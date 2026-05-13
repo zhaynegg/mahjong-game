@@ -1,0 +1,6 @@
+{
+  "venvPath": "mahjong/backend",
+  "venv": ".venv",
+  "extraPaths": ["mahjong/backend"],
+  "useLibraryCodeForTypes": false
+}

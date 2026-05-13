@@ -1,0 +1,17 @@
+backend/.env
+backend/db.sqlite3
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.production
+*.log
+.DS_Store
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+

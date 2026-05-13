@@ -1,0 +1,7 @@
+Django==5.2.1
+dj-database-url==2.3.0
+django-cors-headers==4.7.0
+django-stubs==5.2.1
+django-stubs-ext==5.2.1
+psycopg[binary]==3.2.9
+stripe
