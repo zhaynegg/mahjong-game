@@ -8,6 +8,11 @@ const API = "http://192.168.0.101:8000/api";
 const API_TIMEOUT_MS = 15000;
 const LAYOUT_API_TIMEOUT_MS = 30000;
 const TILE_SET = ["🀇", "🀈", "🀉", "🀐", "🀑", "🀒", "🀙", "🀚", "🀛", "🀀", "🀁", "🀄"];
+const TILE_SETS = {
+  classic: ["🀇", "🀈", "🀉", "🀐", "🀑", "🀒", "🀙", "🀚", "🀛", "🀀", "🀁", "🀄"],
+  cybertrack: ["⬛", "🟪", "🟦", "🟩", "🟨", "🟧", "⬜", "🔷", "🔶", "🔹", "🔸", "💠"],
+  sakura: ["🌸", "🌺", "🌻", "🌷", "🌹", "🏵️", "💐", "🍃", "🍂", "🍁", "🌿", "🎋"],
+};
 const TILE_STEP_X = 60;
 const TILE_STEP_Y = 76;
 const TILE_DEPTH = 7;
@@ -102,7 +107,7 @@ function maxLayersByDifficulty(difficulty) {
   return 3;
 }
 
-function generateBoard(difficulty, seed) {
+function generateBoard(difficulty, seed, tileSet = TILE_SET) {
   const random = rng(seed);
   const structures = STRUCTURES.filter((structure) => structure.difficulty === difficulty);
   const structureList = structures.length ? structures : STRUCTURES;
@@ -119,7 +124,7 @@ function generateBoard(difficulty, seed) {
   const playablePoints = points.slice(0, total);
   const symbols = [];
   for (let i = 0; i < total / 2; i += 1) {
-    const symbol = TILE_SET[i % TILE_SET.length];
+    const symbol = tileSet[i % tileSet.length];
     symbols.push(symbol, symbol);
   }
   for (let i = symbols.length - 1; i > 0; i -= 1) {
@@ -132,14 +137,14 @@ function generateBoard(difficulty, seed) {
   };
 }
 
-function generateCustomBoard(mask, name, seed) {
+function generateCustomBoard(mask, name, seed, tileSet = TILE_SET) {
   const points = maskToPoints(mask);
   const total = points.length % 2 === 0 ? points.length : points.length - 1;
   const playablePoints = points.slice(0, total);
   const random = rng(seed);
   const symbols = [];
   for (let i = 0; i < total / 2; i += 1) {
-    const symbol = TILE_SET[i % TILE_SET.length];
+    const symbol = tileSet[i % tileSet.length];
     symbols.push(symbol, symbol);
   }
   for (let i = symbols.length - 1; i > 0; i -= 1) {
@@ -159,6 +164,34 @@ function formatTime(s) {
 function dailySeed() {
   const now = new Date();
   return Number(`${now.getUTCFullYear()}${now.getUTCMonth() + 1}${now.getUTCDate()}`);
+}
+
+function playPairSound() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  const context = new AudioContext();
+  const now = context.currentTime;
+  const master = context.createGain();
+  master.gain.setValueAtTime(0.0001, now);
+  master.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+  master.connect(context.destination);
+
+  [523.25, 659.25, 783.99].forEach((frequency, index) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, now + index * 0.035);
+    gain.gain.setValueAtTime(0.0001, now + index * 0.035);
+    gain.gain.exponentialRampToValueAtTime(0.5, now + index * 0.035 + 0.018);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24 + index * 0.02);
+    oscillator.connect(gain);
+    gain.connect(master);
+    oscillator.start(now + index * 0.035);
+    oscillator.stop(now + 0.32);
+  });
+
+  setTimeout(() => context.close().catch(() => {}), 420);
 }
 
 export default function App() {
@@ -539,9 +572,10 @@ export default function App() {
     if (nextMode === "daily") {
       seed = dailySeed();
     }
+    const tileSet = TILE_SETS[tileSkin] || TILE_SET;
     const nextBoard = customLayout
-      ? generateCustomBoard(customLayout.mask, customLayout.name, seed)
-      : generateBoard(difficulty, seed);
+      ? generateCustomBoard(customLayout.mask, customLayout.name, seed, tileSet)
+      : generateBoard(difficulty, seed, tileSet);
     setMode(customLayout ? "custom" : nextMode);
     setActiveCustomLayout(customLayout ?? null);
     setLayoutName(nextBoard.name);
@@ -605,10 +639,7 @@ export default function App() {
     if (a && b && a.id !== b.id && a.type === b.type) {
       const nextBoard = board.map((t) => (t.id === a.id || t.id === b.id ? { ...t, removed: true, hint: false, removedAt: Date.now() } : t));
       setBoard(nextBoard);
-      // Play tile disappear sound
-      const sound = new Audio('/sounds/tile-disappear.mp3');
-      sound.volume = 0.3;
-      sound.play().catch(() => {}); // Ignore errors if sound fails
+      playPairSound();
       setUndoStack((v) => [...v, [a.id, b.id]]);
       setMoves((v) => v + 1);
       const scoreIncrease = 120;
@@ -708,6 +739,28 @@ export default function App() {
   const isBuilder = page === "builder";
   const customPoints = maskToPoints(customMask);
   const builderProgress = customPoints.length ? Math.round((customPoints.length / (GRID_WIDTH * GRID_HEIGHT * customMask.length)) * 100) : 0;
+  const builderPreviewCells = Array.from({ length: GRID_HEIGHT }).flatMap((_, rowIdx) =>
+    Array.from({ length: GRID_WIDTH }).map((_, colIdx) => {
+      const level = customMask.reduce(
+        (topLevel, levelRows, levelIdx) => (levelRows[rowIdx][colIdx] === "#" ? levelIdx : topLevel),
+        -1,
+      );
+      return { x: colIdx, y: rowIdx, level };
+    }),
+  );
+  const builderPreviewTiles = builderPreviewCells
+    .filter((cell) => cell.level >= 0)
+    .flatMap((cell) =>
+      Array.from({ length: cell.level + 1 }).map((_, z) => ({
+        id: `preview-${cell.x}-${cell.y}-${z}`,
+        x: cell.x,
+        y: cell.y,
+        z,
+        type: TILE_SET[(cell.y * GRID_WIDTH + cell.x + z) % TILE_SET.length],
+      })),
+    );
+  const builderPreviewMaxX = Math.max(...builderPreviewTiles.map((tile) => tile.x), 0);
+  const builderPreviewMaxY = Math.max(...builderPreviewTiles.map((tile) => tile.y), 0);
   const pageTitle = isBuilder
     ? "Pro board designer"
     : isHome
@@ -824,6 +877,42 @@ export default function App() {
                   }),
                 )}
               </div>
+              <div className="builder-preview-panel">
+                <div className="section-title">
+                  <p className="eyebrow">Preview</p>
+                  <h3>{customName}</h3>
+                </div>
+                {builderPreviewTiles.length === 0 ? (
+                  <div className="builder-preview-empty">Place tiles to preview the playable board.</div>
+                ) : (
+                  <div className="builder-real-preview-wrap">
+                    <div
+                      className="board builder-real-preview-board"
+                      style={{
+                        width: `${(builderPreviewMaxX + 2) * TILE_STEP_X}px`,
+                        height: `${(builderPreviewMaxY + 2) * TILE_STEP_Y}px`,
+                      }}
+                    >
+                      {builderPreviewTiles
+                        .sort((a, b) => a.z - b.z)
+                        .map((tile) => (
+                          <div
+                            key={tile.id}
+                            className={`tile skin-${tileSkin} layer-${tile.z} builder-preview-tile`}
+                            style={{
+                              left: `${tile.x * TILE_STEP_X - tile.z * TILE_DEPTH}px`,
+                              top: `${tile.y * TILE_STEP_Y - tile.z * TILE_DEPTH}px`,
+                              zIndex: tile.z * 100 + tile.y,
+                            }}
+                          >
+                            <span className="tile-symbol">{tile.type}</span>
+                            {tile.z > 0 && <span className="tile-level">{tile.z + 1}</span>}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
           </div>
         </section>
 
@@ -908,7 +997,6 @@ export default function App() {
               remainingPairs={remainingPairs}
               availablePairs={availablePairs}
               progress={progress}
-              mode={mode}
               layoutName={layoutName}
               coach={coach}
               onShuffle={onShuffle}

@@ -500,6 +500,43 @@ p {
   border-radius: 16px;
 }
 
+.builder-preview-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.builder-real-preview-wrap {
+  overflow: auto;
+  padding: 18px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.builder-real-preview-board {
+  min-height: 280px;
+  transform: scale(0.74);
+  transform-origin: top left;
+  margin: 0;
+}
+
+.builder-preview-tile {
+  pointer-events: none;
+}
+
+.builder-preview-empty {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .builder-cell {
   width: 30px;
   height: 30px;
@@ -633,17 +670,22 @@ p {
 .tile.skin-kazakh,
 .skin-swatch.skin-kazakh {
   --tile-face:
-    radial-gradient(circle at 50% 50%, transparent 0 15%, #f7c948 16% 19%, transparent 20%),
-    radial-gradient(circle at 18% 18%, #f7c948 0 5%, transparent 6%),
-    radial-gradient(circle at 82% 82%, #f7c948 0 5%, transparent 6%),
-    linear-gradient(45deg, transparent 0 43%, rgba(247, 201, 72, 0.5) 44% 47%, transparent 48% 52%, rgba(247, 201, 72, 0.5) 53% 56%, transparent 57%),
-    linear-gradient(145deg, #e9fffb 0%, #35b3b0 52%, #0b6968 100%);
-  --tile-face-edge: #f7c948;
-  --tile-face-shadow: rgba(5, 80, 78, 0.24);
+    radial-gradient(circle at 72% 26%, #f8d24a 0 9%, transparent 10%),
+    repeating-conic-gradient(from 0deg at 72% 26%, rgba(248, 210, 74, 0.8) 0 7deg, transparent 7deg 18deg),
+    radial-gradient(ellipse at 47% 58%, rgba(98, 62, 14, 0.74) 0 8%, transparent 9%),
+    radial-gradient(ellipse at 35% 53%, rgba(248, 210, 74, 0.58) 0 13%, transparent 14%),
+    radial-gradient(ellipse at 59% 53%, rgba(248, 210, 74, 0.58) 0 13%, transparent 14%),
+    linear-gradient(90deg, rgba(248, 210, 74, 0.95) 0 7%, transparent 7%),
+    repeating-linear-gradient(0deg, transparent 0 7px, rgba(248, 210, 74, 0.38) 7px 9px, transparent 9px 16px),
+    linear-gradient(145deg, #b8f6ff 0%, #2bb8d6 52%, #087e9a 100%);
+  --tile-face-edge: #f8d24a;
+  --tile-face-shadow: rgba(4, 93, 116, 0.28);
   background:
-    linear-gradient(45deg, transparent 0 43%, rgba(247, 201, 72, 0.45) 44% 47%, transparent 48% 52%, rgba(247, 201, 72, 0.45) 53% 56%, transparent 57%),
-    linear-gradient(135deg, #2bc4bd 0%, #0d8885 48%, #064c4b 100%);
-  color: #063735;
+    radial-gradient(circle at 72% 26%, #f8d24a 0 9%, transparent 10%),
+    radial-gradient(ellipse at 43% 55%, rgba(248, 210, 74, 0.56) 0 16%, transparent 17%),
+    linear-gradient(90deg, rgba(248, 210, 74, 0.86) 0 8%, transparent 8%),
+    linear-gradient(135deg, #39c8e4 0%, #0aa2c7 48%, #05667b 100%);
+  color: #053845;
 }
 
 .tile.skin-sakura,
@@ -666,12 +708,19 @@ p {
 .tile.skin-minimalist,
 .skin-swatch.skin-minimalist {
   --tile-face:
-    linear-gradient(90deg, transparent 0 12%, rgba(20, 24, 28, 0.13) 13% 14%, transparent 15%),
-    linear-gradient(145deg, #ffffff 0%, #f6f5f1 52%, #d7d2c7 100%);
-  --tile-face-edge: #1f2428;
-  --tile-face-shadow: rgba(0, 0, 0, 0.08);
+    radial-gradient(circle at 28% 28%, #111827 0 3px, transparent 4px),
+    radial-gradient(circle at 72% 72%, #111827 0 2px, transparent 3px),
+    linear-gradient(90deg, transparent 0 20%, rgba(20, 24, 28, 0.22) 20% 22%, transparent 22% 78%, rgba(20, 24, 28, 0.22) 78% 80%, transparent 80%),
+    linear-gradient(0deg, transparent 0 49%, rgba(20, 24, 28, 0.2) 49% 51%, transparent 51%),
+    repeating-linear-gradient(135deg, rgba(20, 24, 28, 0.06) 0 1px, transparent 1px 10px),
+    linear-gradient(145deg, #ffffff 0%, #f7f7f4 52%, #d7d2c7 100%);
+  --tile-face-edge: #20242a;
+  --tile-face-shadow: rgba(0, 0, 0, 0.1);
   background:
-    linear-gradient(135deg, #fefefe 0%, #e7e4dc 48%, #b9b3a7 100%);
+    radial-gradient(circle at 28% 28%, #111827 0 3px, transparent 4px),
+    linear-gradient(90deg, transparent 0 20%, rgba(20, 24, 28, 0.18) 20% 22%, transparent 22%),
+    repeating-linear-gradient(135deg, rgba(20, 24, 28, 0.08) 0 1px, transparent 1px 9px),
+    linear-gradient(135deg, #fefefe 0%, #e8e7e2 48%, #b9b3a7 100%);
   color: #15181b;
   box-shadow: 
     inset 0 1px 2px rgba(255, 255, 255, 0.5),

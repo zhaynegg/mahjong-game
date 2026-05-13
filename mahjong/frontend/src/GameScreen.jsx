@@ -20,7 +20,6 @@ export default function GameScreen({
   remainingPairs,
   availablePairs,
   progress,
-  mode,
   layoutName,
   coach,
   onShuffle,
@@ -89,10 +88,6 @@ export default function GameScreen({
             <div><span>Pairs left</span><strong>{remainingPairs}</strong></div>
             <div><span>Available</span><strong>{availablePairs}</strong></div>
             <div><span>Clear</span><strong>{progress}%</strong></div>
-            <div><span>Rank</span><strong>{user.rank || "Rookie"}</strong></div>
-            <div><span>XP</span><strong>{user.xp ?? 0}</strong></div>
-            <div><span>Mode</span><strong>{mode}</strong></div>
-            <div><span>Layout</span><strong>{layoutName}</strong></div>
           </div>
           <p className="coach">{coach}</p>
         </section>
