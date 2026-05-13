@@ -7,7 +7,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max, Min
+from django.db.models import Avg, Count, F, Max, Min
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
@@ -254,7 +254,11 @@ def pro_layouts(request):
         return JsonResponse({"detail": "Pro feature only"}, status=403)
 
     if request.method == "GET":
-        layouts = CustomLayout.objects.filter(user=user).select_related("user")
+        layouts = (
+            CustomLayout.objects.filter(user=user)
+            .select_related("user")
+            .annotate(ratings_total=Count("ratings"), ratings_average=Avg("ratings__score"))
+        )
         items = [
             {
                 "id": layout.pk,
@@ -262,8 +266,9 @@ def pro_layouts(request):
                 "mask": json.loads(layout.mask),
                 "created_at": layout.created_at.isoformat(),
                 "is_shared": layout.is_shared,
-                "rating_count": layout.rating_count,
-                "avg_rating": round(layout.average_rating, 2),
+                "total_plays": layout.total_plays,
+                "rating_count": layout.ratings_total,
+                "avg_rating": round(layout.ratings_average or 0, 2),
             }
             for layout in layouts
         ]
@@ -318,7 +323,11 @@ def share_layout(request, layout_id):
 
 @require_GET
 def shared_layouts(request):
-    layouts = CustomLayout.objects.filter(is_shared=True).select_related("user")
+    layouts = (
+        CustomLayout.objects.filter(is_shared=True)
+        .select_related("user")
+        .annotate(ratings_total=Count("ratings"), ratings_average=Avg("ratings__score"))
+    )
     items = []
     for layout in layouts:
         layout_mask = json.loads(layout.mask)
@@ -329,14 +338,28 @@ def shared_layouts(request):
                 "username": layout.user.username,
                 "mask": layout_mask,
                 "created_at": layout.created_at.isoformat(),
-                "rating_count": layout.rating_count,
-                "avg_rating": round(layout.average_rating, 2),
+                "total_plays": layout.total_plays,
+                "rating_count": layout.ratings_total,
+                "avg_rating": round(layout.ratings_average or 0, 2),
                 "tiles_count": mask_to_points(layout_mask),
                 "difficulty": "Custom",
                 "shared": layout.is_shared,
             }
         )
     return JsonResponse({"items": items})
+
+
+@csrf_exempt
+@require_POST
+def record_shared_layout_play(request, layout_id):
+    user = auth_user(request)
+    if not user:
+        return JsonResponse({"detail": "Unauthorized"}, status=401)
+    updated = CustomLayout.objects.filter(id=layout_id, is_shared=True).update(total_plays=F("total_plays") + 1)
+    if not updated:
+        return JsonResponse({"detail": "Layout not found."}, status=404)
+    layout = CustomLayout.objects.get(id=layout_id)
+    return JsonResponse({"ok": True, "total_plays": layout.total_plays})
 
 
 @csrf_exempt

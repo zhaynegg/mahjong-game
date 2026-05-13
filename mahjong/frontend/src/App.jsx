@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import GameScreen from "./GameScreen";
+import HomeScreen from "./HomeScreen";
 import ProfilePage from "./ProfilePage";
 import SharedLayoutsPage from "./SharedLayoutsPage";
 
-const API = "http://127.0.0.1:8000/api";
-let lastStartedToken = null;
+const API = "http://192.168.0.101:8000/api";
+const API_TIMEOUT_MS = 15000;
+const LAYOUT_API_TIMEOUT_MS = 30000;
 const TILE_SET = ["🀇", "🀈", "🀉", "🀐", "🀑", "🀒", "🀙", "🀚", "🀛", "🀀", "🀁", "🀄"];
 const TILE_STEP_X = 60;
 const TILE_STEP_Y = 76;
@@ -16,6 +19,11 @@ const TILE_SKINS = [
   { id: "sunset", label: "Sunset", pro: true },
   { id: "moon", label: "Moon", pro: true },
   { id: "stone", label: "Stone", pro: true },
+  { id: "cybertrack", label: "Cybertrack", pro: true },
+  { id: "kazakh", label: "Kazakh Ornaments", pro: true },
+  { id: "sakura", label: "Sakura", pro: true },
+  { id: "minimalist", label: "Minimalist", pro: true },
+  { id: "neon", label: "Neon", pro: true },
 ];
 
 function maskToPoints(mask) {
@@ -148,6 +156,11 @@ function formatTime(s) {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
+function dailySeed() {
+  const now = new Date();
+  return Number(`${now.getUTCFullYear()}${now.getUTCMonth() + 1}${now.getUTCDate()}`);
+}
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("mf_token") || "");
   const [theme, setTheme] = useState(localStorage.getItem("mf_theme") || "dark");
@@ -158,8 +171,16 @@ export default function App() {
   const [difficulty, setDifficulty] = useState("medium");
   const [tileSkin, setTileSkin] = useState(localStorage.getItem("mf_tile_skin") || "classic");
   const [mode, setMode] = useState("classic");
+  const [hasTimer, setHasTimer] = useState(true);
+  const [hasScore, setHasScore] = useState(true);
+  const [hasUndo, setHasUndo] = useState(true);
+  const [hasHints, setHasHints] = useState(true);
+
+  const [timeLimit, setTimeLimit] = useState(null);
   const [layoutName, setLayoutName] = useState("Classic");
-  const [page, setPage] = useState("play");
+  const [page, setPage] = useState("home");
+  const [homeMode, setHomeMode] = useState("classic");
+  const [selectedLayoutId, setSelectedLayoutId] = useState("");
   const [victory, setVictory] = useState(null);
   const [customLayouts, setCustomLayouts] = useState([]);
   const [customName, setCustomName] = useState("My layout");
@@ -191,15 +212,27 @@ export default function App() {
     if (!user?.is_pro && TILE_SKINS.find((skin) => skin.id === tileSkin)?.pro) {
       setTileSkin("classic");
     }
+    if (!TILE_SKINS.some((skin) => skin.id === tileSkin)) {
+      setTileSkin("classic");
+    }
   }, [user, tileSkin]);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const isHome = page === "home";
   const isProfile = page === "profile";
   const isShared = page === "shared";
 
   async function api(path, options = {}) {
+    const { timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options;
     const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const response = await fetch(`${API}${path}`, { ...options, headers });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      response = await fetch(`${API}${path}`, { ...fetchOptions, headers, signal: options.signal || controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     const json = await response.json();
     if (!response.ok) {
       const d = json.detail;
@@ -230,28 +263,46 @@ export default function App() {
   }, [freeTiles]);
 
   useEffect(() => {
-    const id = setInterval(() => setTime(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    const id = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      if (timeLimit) {
+        const remaining = timeLimit - elapsed;
+        setTime(remaining);
+        if (remaining <= 0) {
+          // Game over for Blitz
+          setVictory({ score: score, time: elapsed, moves, mode, difficulty, lost: true });
+        }
+      } else {
+        setTime(elapsed);
+      }
+    }, 1000);
     return () => clearInterval(id);
-  }, [startedAt]);
+  }, [startedAt, timeLimit, score, moves, mode, difficulty]);
 
   useEffect(() => {
     document.body.classList.toggle("light", theme === "light");
     localStorage.setItem("mf_theme", theme);
   }, [theme]);
 
-  async function loadProfile() {
+  async function loadProfile({ includeRelated = true } = {}) {
     if (!token) return;
     try {
       const me = await api("/me");
       setUser(me);
       setDrawerOpen(false);
-      await Promise.all([loadHistory(), loadLeaderboards()]);
+      if (includeRelated) {
+        Promise.all([loadHistory(), loadLeaderboards()]).catch(() => {});
+      }
     } catch {
       setToken("");
       setUser(null);
       setDrawerOpen(false);
       localStorage.removeItem("mf_token");
     }
+  }
+
+  async function refreshAfterGame() {
+    await Promise.all([loadHistory(), loadLeaderboards(), loadProfile({ includeRelated: false })]);
   }
 
   useEffect(() => {
@@ -272,12 +323,6 @@ export default function App() {
     }
   }, [page, user]);
 
-  useEffect(() => {
-    if (!token) {
-      lastStartedToken = null;
-    }
-  }, [token]);
-
   async function loadHistory() {
     const data = await api("/game/history");
     setHistory(data.items);
@@ -297,7 +342,7 @@ export default function App() {
     }
     setSharedLoading(true);
     try {
-      const data = await api("/shared-layouts");
+      const data = await api("/shared-layouts", { timeoutMs: LAYOUT_API_TIMEOUT_MS });
       setSharedLayouts(data.items || []);
     } catch {
       setSharedLayouts([]);
@@ -315,6 +360,37 @@ export default function App() {
     }
   }
 
+  async function playSharedLayout(layout) {
+    setSharedLayouts((items) =>
+      items.map((item) =>
+        item.id === layout.id ? { ...item, total_plays: (item.total_plays || 0) + 1 } : item,
+      ),
+    );
+    api(`/shared-layouts/${layout.id}/play`, { method: "POST", body: JSON.stringify({}) }).catch(() => {});
+    startGame("custom", layout);
+  }
+
+  async function submitVictoryRating(score) {
+    if (!activeCustomLayout?.id) return;
+    await rateSharedLayout(activeCustomLayout.id, score);
+    setVictory((current) => (current ? { ...current, rated: true } : current));
+  }
+
+  function goHome() {
+    setBoard([]);
+    setSelected([]);
+    setUndoStack([]);
+    setMoves(0);
+    setScore(0);
+    setHintsUsed(0);
+    setTime(0);
+    setVictory(null);
+    setActiveCustomLayout(null);
+    setLayoutName("Classic");
+    setMode("classic");
+    setPage("home");
+  }
+
   async function toggleLayoutShare(layoutId, share) {
     try {
       await api(`/pro/layouts/${layoutId}/share`, { method: "POST", body: JSON.stringify({ shared: share }) });
@@ -329,7 +405,7 @@ export default function App() {
 
   async function loadLayouts() {
     try {
-      const data = await api("/pro/layouts");
+      const data = await api("/pro/layouts", { timeoutMs: LAYOUT_API_TIMEOUT_MS });
       setCustomLayouts(data.items || []);
     } catch {
       setCustomLayouts([]);
@@ -380,9 +456,10 @@ export default function App() {
 }
 
   function returnToPlay() {
-    setPage("play");
     if (board.length === 0) {
-      startGame("classic").catch(() => {});
+      setPage("home");
+    } else {
+      setPage("play");
     }
   }
 
@@ -396,7 +473,6 @@ export default function App() {
       setBuilderStatus("Tile count must be even.");
       return;
     }
-    setPage("play");
     startGame("custom", { name: customName.trim() || "My layout", mask: customMask });
   }
 
@@ -433,11 +509,14 @@ export default function App() {
     setBuilderStatus("");
   }
 
-  async function fetchCoach() {
+  function updateCoach() {
     const topLayerFree = freeTiles.filter((t) => t.z >= 2).length;
     const blockedRisk = Math.max(0, 5 - availablePairs);
-    const data = await api(`/coach?pairs_left=${availablePairs}&top_layer_free=${topLayerFree}&blocked_risk=${blockedRisk}`);
-    setCoach(`AI Coach: ${data.tip}`);
+    let tip = "Board is stable. Keep hints for endgame.";
+    if (availablePairs === 0) tip = "No safe pair is open. Shuffle now.";
+    else if (topLayerFree >= 4) tip = "Clear top layers first to unlock buried pairs.";
+    else if (blockedRisk >= 4) tip = "Match side tiles before the board locks.";
+    setCoach(`AI Coach: ${tip}`);
   }
 
   async function upgradePro() {
@@ -452,14 +531,13 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (user) fetchCoach().catch(() => {});
+    if (user) updateCoach();
   }, [availablePairs, board.length, user]);
 
-  async function startGame(nextMode, customLayout = null) {
+  function startGame(nextMode, customLayout = null) {
     let seed = Math.floor(Math.random() * 1_000_000);
     if (nextMode === "daily") {
-      const daily = await api("/daily-challenge");
-      seed = daily.seed;
+      seed = dailySeed();
     }
     const nextBoard = customLayout
       ? generateCustomBoard(customLayout.mask, customLayout.name, seed)
@@ -476,18 +554,18 @@ export default function App() {
     setHintsUsed(0);
     setStartedAt(Date.now());
     setTime(0);
+    setPage("play");
   }
 
-  useEffect(() => {
-    if (!user || token === lastStartedToken) return;
-    lastStartedToken = token;
-    startGame("classic");
-  }, [user, token]);
-
-  useEffect(() => {
-    if (!user || token !== lastStartedToken) return;
-    startGame("classic");
-  }, [difficulty]);
+  function startHomeGame() {
+    if (homeMode === "custom") {
+      const layout = customLayouts.find((item) => String(item.id) === selectedLayoutId);
+      if (!layout) return;
+      startGame("custom", layout);
+      return;
+    }
+    startGame(homeMode);
+  }
 
   async function submitAuth() {
     setAuthError("");
@@ -527,19 +605,19 @@ export default function App() {
     if (a && b && a.id !== b.id && a.type === b.type) {
       const nextBoard = board.map((t) => (t.id === a.id || t.id === b.id ? { ...t, removed: true, hint: false, removedAt: Date.now() } : t));
       setBoard(nextBoard);
+      // Play tile disappear sound
+      const sound = new Audio('/sounds/tile-disappear.mp3');
+      sound.volume = 0.3;
+      sound.play().catch(() => {}); // Ignore errors if sound fails
       setUndoStack((v) => [...v, [a.id, b.id]]);
       setMoves((v) => v + 1);
-      setScore((v) => v + 120);
+      const scoreIncrease = 120;
+      setScore((v) => v + scoreIncrease);
       setSelected([]);
       if (nextBoard.every((t) => t.removed)) {
         const finalTime = Math.floor((Date.now() - startedAt) / 1000);
         const finalScore = score + 120 + Math.max(0, 500 - finalTime * 2);
         setScore(finalScore);
-        await api("/game/result", {
-          method: "POST",
-          body: JSON.stringify({ mode, difficulty, score: finalScore, time_seconds: finalTime, won: true, hints_used: hintsUsed }),
-        });
-        await Promise.all([loadHistory(), loadLeaderboards(), loadProfile()]);
         setVictory({
           score: finalScore,
           time: finalTime,
@@ -547,6 +625,12 @@ export default function App() {
           mode,
           difficulty,
         });
+        api("/game/result", {
+          method: "POST",
+          body: JSON.stringify({ mode, difficulty, score: finalScore, time_seconds: finalTime, won: true, hints_used: hintsUsed }),
+        })
+          .then(refreshAfterGame)
+          .catch(() => {});
       }
     } else {
       setScore((v) => Math.max(0, v - 10));
@@ -624,6 +708,17 @@ export default function App() {
   const isBuilder = page === "builder";
   const customPoints = maskToPoints(customMask);
   const builderProgress = customPoints.length ? Math.round((customPoints.length / (GRID_WIDTH * GRID_HEIGHT * customMask.length)) * 100) : 0;
+  const pageTitle = isBuilder
+    ? "Pro board designer"
+    : isHome
+      ? "Home"
+      : isProfile
+        ? "Profile"
+        : isShared
+          ? "Shared layouts"
+      : mode === "daily"
+        ? "Daily board"
+        : "Mahjong board";
 
   return (
 
@@ -631,38 +726,86 @@ export default function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Mahjong Focus</p>
-          <h1>{isBuilder ? "Pro board designer" : mode === "daily" ? "Daily board" : "Mahjong board"}</h1>
+          <h1>{pageTitle}</h1>
         </div>
         <div className="topbar-actions">
-          {page !== "play" && (
-            <button className="topbar-button" onClick={() => setPage("play")}>Game</button>
+          {page !== "home"  && (
+            <button className="topbar-button" onClick={goHome}>Home</button>
           )}
-          {page !== "profile" && (
+          {(page !== "profile" && page !== "play") && (
             <button className="topbar-button" onClick={() => setPage("profile")}>Profile</button>
           )}
-          {page !== "shared" && (
+          {(page !== "shared" && page !== "play") && (
             <button className="topbar-button" onClick={() => setPage("shared")}>Shared layouts</button>
           )}
-          <button className="menu-button" onClick={() => setDrawerOpen(true)} aria-label="Open menu">
+          {page !== "play"  && (
+            <button className="menu-button" onClick={() => setDrawerOpen(true)} aria-label="Open menu">
             <span></span>
             <span></span>
             <span></span>
           </button>
+          )}
         </div>
       </header>
 
-      <main className="game-shell">
-        <section className="board-panel">
+      <main className={isHome || isProfile || isShared ? "content-shell" : "game-shell"}>
+        {isHome ? (
+          <HomeScreen
+            user={user}
+            difficulty={difficulty}
+            onDifficultyChange={setDifficulty}
+            tileSkin={tileSkin}
+            onTileSkinChange={setTileSkin}
+            availableSkins={availableSkins}
+            customLayouts={customLayouts}
+            selectedLayoutId={selectedLayoutId}
+            onSelectedLayoutChange={setSelectedLayoutId}
+            selectedMode={homeMode}
+            onSelectedModeChange={setHomeMode}
+            onStart={startHomeGame}
+            onOpenBuilder={() => setPage("builder")}
+            onOpenShared={() => setPage("shared")}
+          />
+        ) : isProfile ? (
+          <section className="board-panel">
+            <div className="board-toolbar">
+              <div>
+                <p className="eyebrow">Profile</p>
+                <h2>Player profile</h2>
+              </div>
+            </div>
+            <div className="board-wrap">
+              <ProfilePage user={user} history={history} customLayouts={customLayouts} />
+            </div>
+          </section>
+        ) : isShared ? (
+          <section className="board-panel">
+            <div className="board-toolbar">
+              <div>
+                <p className="eyebrow">Community board hall</p>
+                <h2>Shared layouts</h2>
+              </div>
+            </div>
+            <div className="board-wrap">
+              <SharedLayoutsPage
+                user={user}
+                layouts={sharedLayouts}
+                loading={sharedLoading}
+                onPlay={playSharedLayout}
+              />
+            </div>
+          </section>
+        ) : isBuilder ? (
+          <>
+            <section className="board-panel">
           <div className="board-toolbar">
             <div>
-              <p className="eyebrow">{isBuilder ? "Design mode" : isProfile ? "Profile" : `Playing as ${user.username} · ${user.city}`}</p>
-              <h2>{isBuilder ? customName : isProfile ? "Player profile" : layoutName}</h2>
+              <p className="eyebrow">Design mode</p>
+              <h2>{customName}</h2>
             </div>
-            {!isBuilder && !isProfile && <div className="timer">{formatTime(time)}</div>}
           </div>
 
           <div className="board-wrap">
-            {isBuilder ? (
               <div className="builder-grid" style={{ gridTemplateColumns: `repeat(${GRID_WIDTH}, 30px)` }}>
                 {Array.from({ length: GRID_HEIGHT }).map((_, rowIdx) =>
                   Array.from({ length: GRID_WIDTH }).map((_, colIdx) => {
@@ -681,46 +824,10 @@ export default function App() {
                   }),
                 )}
               </div>
-            ) : isProfile ? (
-              <ProfilePage user={user} history={history} customLayouts={customLayouts} />
-            ) : isShared ? (
-              <SharedLayoutsPage
-                user={user}
-                layouts={sharedLayouts}
-                loading={sharedLoading}
-                onPlay={(layout) => { setPage("play"); startGame("custom", layout); }}
-                onRate={rateSharedLayout}
-              />
-            ) : (
-              <div className="board" style={{ width: `${(maxX + 2) * TILE_STEP_X}px`, height: `${(maxY + 2) * TILE_STEP_Y}px` }}>
-                {board
-                  .filter((t) => !t.removed || (t.removed && Date.now() - (t.removedAt || 0) < 300))
-                  .sort((a, b) => a.z - b.z)
-                  .map((tile) => (
-                    <button
-                      key={tile.id}
-                      className={`tile skin-${tileSkin} layer-${tile.z} ${isFree(tile) ? "free" : ""} ${selected.includes(tile.id) ? "selected" : ""} ${tile.hint ? "hint" : ""} ${tile.removed ? "removed" : ""}`}
-                      data-level={tile.z + 1}
-                      style={{
-                        left: `${tile.x * TILE_STEP_X - tile.z * TILE_DEPTH}px`,
-                        top: `${tile.y * TILE_STEP_Y - tile.z * TILE_DEPTH}px`,
-                        zIndex: tile.z * 100 + tile.y,
-                      }}
-                      onClick={() => onTileClick(tile.id)}
-                    >
-                      <span className="tile-symbol">{tile.type}</span>
-                      {tile.z > 0 && <span className="tile-level">{tile.z + 1}</span>}
-                    </button>
-                  ))}
-              </div>
-            )}
           </div>
         </section>
 
-        {!isProfile && !isShared && (
           <aside className="info-rail">
-            {isBuilder ? (
-              <>
                 <section className="panel">
                 <div className="section-title">
                   <p className="eyebrow">Layout studio</p>
@@ -778,80 +885,40 @@ export default function App() {
                   </ul>
                 )}
               </section>
-            </>
-          ) : (
-            <>
-              <section className="panel">
-                <div className="section-title">
-                  <p className="eyebrow">Setup</p>
-                  <h3>Board control</h3>
-                </div>
-                <label>Difficulty</label>
-                <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-                <label>Tile skin</label>
-                <select value={tileSkin} onChange={(e) => setTileSkin(e.target.value)}>
-                  {availableSkins.map((skin) => (
-                    <option key={skin.id} value={skin.id}>
-                      {skin.label}{skin.pro ? " (Pro)" : ""}
-                    </option>
-                  ))}
-                </select>
-                {user?.is_pro && customLayouts.length > 0 && (
-                  <>
-                    <label>Custom layout</label>
-                    <select defaultValue="" onChange={(e) => {
-                      if (e.target.value) {
-                        const layout = customLayouts.find((l) => l.id === parseInt(e.target.value));
-                        if (layout) startGame("custom", layout);
-                        e.target.value = "";
-                      }
-                    }}>
-                      <option value="">Load saved layout...</option>
-                      {customLayouts.map((layout) => (
-                        <option key={layout.id} value={layout.id}>
-                          {layout.name}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
-                <div className="button-grid two">
-                  <button onClick={() => startGame("classic")}>New</button>
-                  <button className="accent" onClick={() => startGame("daily")}>Daily</button>
-                </div>
-                <div className="button-grid three">
-                  <button className="quiet" onClick={onShuffle}>Shuffle</button>
-                  <button className="quiet" onClick={onUndo}>Undo</button>
-                  <button className="quiet" onClick={onHint}>Hint</button>
-                </div>
-              </section>
-
-              <section className="panel">
-                <div className="section-title">
-                  <p className="eyebrow">Live stats</p>
-                  <h3>Current run</h3>
-                </div>
-                <div className="stat-grid">
-                  <div><span>Score</span><strong>{score}</strong></div>
-                  <div><span>Moves</span><strong>{moves}</strong></div>
-                  <div><span>Pairs left</span><strong>{remainingPairs}</strong></div>
-                  <div><span>Available</span><strong>{availablePairs}</strong></div>
-                  <div><span>Clear</span><strong>{progress}%</strong></div>
-                  <div><span>Rank</span><strong>{user.rank || "Rookie"}</strong></div>
-                  <div><span>XP</span><strong>{user.xp ?? 0}</strong></div>
-                  <div><span>Mode</span><strong>{mode}</strong></div>
-                  <div><span>Layout</span><strong>{layoutName}</strong></div>
-                </div>
-                <p className="coach">{coach}</p>
-              </section>
-            </>
-          )}
         </aside>
-      )}
+          </>
+        ) : (
+            <GameScreen
+              board={board}
+              user={user}
+              time={time}
+              hasTimer={hasTimer}
+              formatTime={formatTime}
+              maxX={maxX}
+              maxY={maxY}
+              tileSkin={tileSkin}
+              isFree={isFree}
+              selected={selected}
+              onTileClick={onTileClick}
+              tileStepX={TILE_STEP_X}
+              tileStepY={TILE_STEP_Y}
+              tileDepth={TILE_DEPTH}
+              score={score}
+              moves={moves}
+              remainingPairs={remainingPairs}
+              availablePairs={availablePairs}
+              progress={progress}
+              mode={mode}
+              layoutName={layoutName}
+              coach={coach}
+              onShuffle={onShuffle}
+              onUndo={onUndo}
+              onHint={onHint}
+              hasUndo={hasUndo}
+              hasHints={hasHints}
+              hasScore={hasScore}
+            />
+        )}
       </main>
 
       <div className={`drawer-backdrop ${drawerOpen ? "open" : ""}`} onClick={() => setDrawerOpen(false)}></div>
@@ -874,20 +941,6 @@ export default function App() {
           </ul>
         </section>
 
-        <section 
-          className="drawer-section"
-          style={{
-            maxHeight: "260px",
-            overflowY: "auto",
-          }}>
-          <h3>My history</h3>
-          <ul className="list">
-            {history.length === 0 && <li>No games yet.</li>}
-            {history.map((item, idx) => (
-              <li key={`${item.created_at}-${idx}`}>{item.mode} · {item.difficulty} · {item.score} pts · {item.time_seconds}s</li>
-            ))}
-          </ul>
-        </section>
 
         <section className="drawer-section">
           <h3>Social filter</h3>
@@ -903,42 +956,9 @@ export default function App() {
           </ul>
         </section>
 
-        {user.is_pro && (
-          <section className="drawer-section">
-            <h3>Saved layouts</h3>
-            {customLayouts.length === 0 ? (
-              <p>No saved layouts yet.</p>
-            ) : (
-              <ul className="list compact-list">
-                {customLayouts.map((layout) => (
-                  <li key={layout.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "8px", alignItems: "center" }}>
-                    <div>{layout.name}</div>
-                    <div style={{ display: "grid", gap: "6px", gridTemplateColumns: "repeat(2, minmax(0, auto))" }}>
-                      <button className="quiet" onClick={() => { setPage("play"); setDrawerOpen(false); startGame("custom", layout); }} style={{ padding: "4px 8px", fontSize: "0.85rem" }}>
-                        Play
-                      </button>
-                      <button className="quiet" onClick={() => toggleLayoutShare(layout.id, !layout.is_shared)} style={{ padding: "4px 8px", fontSize: "0.85rem" }}>
-                        {layout.is_shared ? "Unshare" : "Share"}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
 
         <div className="drawer-actions">
           <button className="quiet" onClick={() => setTheme((v) => (v === "dark" ? "light" : "dark"))}>Theme</button>
-          <button className="quiet" onClick={() => { setPage("play"); setDrawerOpen(false); }}>
-            Game
-          </button>
-          <button className="quiet" onClick={() => { setPage("profile"); setDrawerOpen(false); }}>
-            Profile
-          </button>
-          <button className="quiet" onClick={() => { setPage("shared"); setDrawerOpen(false); }}>
-            Shared layouts
-          </button>
           {user.is_pro ? (
             <button className="accent" onClick={() => { setPage("builder"); setDrawerOpen(false); }}>
               Pro layout studio
@@ -994,11 +1014,6 @@ export default function App() {
           <span>Moves</span>
           <strong>{victory.moves}</strong>
         </div>
-
-        <div>
-          <span>Mode</span>
-          <strong>{victory.mode}</strong>
-        </div>
       </div>
 
       <div
@@ -1030,6 +1045,22 @@ export default function App() {
           Play again
         </button>
       </div>
+      {mode === "custom" && activeCustomLayout?.id && activeCustomLayout?.shared && (
+        <div className="victory-rating">
+          <p className="eyebrow">Rate this layout</p>
+          {victory.rated ? (
+            <p className="muted">Thanks for rating.</p>
+          ) : (
+            <div className="rating-buttons">
+              {[1, 2, 3, 4, 5].map((value) => (
+                <button key={value} className="quiet" onClick={() => submitVictoryRating(value)}>
+                  {value}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   </div>
 )}

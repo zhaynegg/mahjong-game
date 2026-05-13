@@ -16,6 +16,7 @@ urlpatterns = [
     path("pro/layouts", views.pro_layouts),
     path("pro/layouts/<int:layout_id>/share", views.share_layout),
     path("shared-layouts", views.shared_layouts),
+    path("shared-layouts/<int:layout_id>/play", views.record_shared_layout_play),
     path("shared-layouts/<int:layout_id>/rate", views.rate_shared_layout),
     path("upgrade-pro", views.upgrade_pro),
     path("stripe-webhook", views.stripe_webhook),

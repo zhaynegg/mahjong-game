@@ -1,5 +1,4 @@
 import React from "react";
-
 function formatProgress(xp, next) {
   if (!next) return 100;
   return Math.min(100, Math.round((xp / next) * 100));
@@ -19,15 +18,15 @@ export default function ProfilePage({ user, history }) {
         </div>
         <div className="hero-stats">
           <div className="hero-card">
-            <span>XP</span>
+            <span>XP:</span>
             <strong>{user.xp ?? 0}</strong>
           </div>
           <div className="hero-card">
-            <span>Layouts</span>
+            <span>Layouts:</span>
             <strong>{user.layout_count ?? 0}</strong>
           </div>
           <div className="hero-card">
-            <span>Wins</span>
+            <span>Wins:</span>
             <strong>{user.total_wins ?? 0}</strong>
           </div>
         </div>
@@ -40,11 +39,11 @@ export default function ProfilePage({ user, history }) {
         </div>
         <div className="rank-card">
           <div>
-            <span>Current rank</span>
+            <span>Current rank:</span>
             <strong>{user.rank || "Rookie"}</strong>
           </div>
           <div>
-            <span>Next level</span>
+            <span>Next level:</span>
             <strong>{user.next_rank_xp ? `${user.next_rank_xp} XP` : "Maxed"}</strong>
           </div>
         </div>
