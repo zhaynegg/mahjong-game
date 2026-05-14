@@ -5,7 +5,7 @@ import HomeScreen from "./HomeScreen";
 import ProfilePage from "./ProfilePage";
 import SharedLayoutsPage from "./SharedLayoutsPage";
 
-const API = "http://192.168.0.101:8000/api";
+const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 const API_TIMEOUT_MS = 15000;
 const LAYOUT_API_TIMEOUT_MS = 30000;
 const TILE_SET = ["🀇", "🀈", "🀉", "🀐", "🀑", "🀒", "🀙", "🀚", "🀛", "🀀", "🀁", "🀄"];
