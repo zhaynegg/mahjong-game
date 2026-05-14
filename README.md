@@ -79,7 +79,6 @@ Backend web service:
 - Root directory: `mahjong/backend`
 - Runtime: Python
 - Build command: `./build.sh`
-- Pre-deploy command: `python manage.py migrate`
 - Start command: `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT`
 - Health check path: `/api/health`
 
