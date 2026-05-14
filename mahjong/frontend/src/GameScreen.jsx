@@ -1,4 +1,4 @@
-import React from "react";
+import { useEffect, useState } from "react";
 
 export default function GameScreen({
   board,
@@ -10,6 +10,7 @@ export default function GameScreen({
   maxY,
   tileSkin,
   isFree,
+  isLocked,
   selected,
   onTileClick,
   tileStepX,
@@ -29,6 +30,20 @@ export default function GameScreen({
   hasHints,
   hasScore,
 }) {
+  const boardWidth = (maxX + 2) * tileStepX;
+  const boardHeight = Math.max(500, (maxY + 2) * tileStepY);
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1200 : window.innerWidth));
+  const boardScale =
+    viewportWidth <= 760
+      ? Math.max(0.36, Math.min(0.78, (viewportWidth - 44) / boardWidth))
+      : 1;
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   return (
     <>
       <section className="board-panel">
@@ -40,26 +55,42 @@ export default function GameScreen({
           {hasTimer && <div className="timer">{formatTime(time)}</div>}
         </div>
         <div className="board-wrap">
-          <div className="board" style={{ width: `${(maxX + 2) * tileStepX}px`, height: `${(maxY + 2) * tileStepY}px` }}>
-            {board
-              .filter((tile) => !tile.removed || (tile.removed && Date.now() - (tile.removedAt || 0) < 300))
-              .sort((a, b) => a.z - b.z)
-              .map((tile) => (
-                <button
-                  key={tile.id}
-                  className={`tile skin-${tileSkin} layer-${tile.z} ${isFree(tile) ? "free" : ""} ${selected.includes(tile.id) ? "selected" : ""} ${tile.hint ? "hint" : ""} ${tile.removed ? "removed" : ""}`}
-                  data-level={tile.z + 1}
-                  style={{
-                    left: `${tile.x * tileStepX - tile.z * tileDepth}px`,
-                    top: `${tile.y * tileStepY - tile.z * tileDepth}px`,
-                    zIndex: tile.z * 100 + tile.y,
-                  }}
-                  onClick={() => onTileClick(tile.id)}
-                >
-                  <span className="tile-symbol">{tile.type}</span>
-                  {tile.z > 0 && <span className="tile-level">{tile.z + 1}</span>}
-                </button>
-              ))}
+          <div
+            className="board-stage"
+            style={{
+              "--board-scale": boardScale,
+              "--board-height": `${boardHeight}px`,
+              width: `${boardWidth * boardScale}px`,
+              height: `${boardHeight * boardScale}px`,
+            }}
+          >
+            <div className="board" style={{ width: `${boardWidth}px`, height: `${boardHeight}px` }}>
+              {board
+                .filter((tile) => !tile.removed || (tile.removed && Date.now() - (tile.removedAt || 0) < 300))
+                .sort((a, b) => a.z - b.z)
+                .map((tile) => {
+                  const locked = isLocked(tile);
+                  return (
+                    <button
+                      key={tile.id}
+                      className={`tile skin-${tileSkin} layer-${tile.z} ${isFree(tile) ? "free" : ""} ${locked ? "locked" : ""} ${selected.includes(tile.id) && !locked ? "selected" : ""} ${tile.hint && !locked ? "hint" : ""} ${tile.removed ? "removed" : ""}`}
+                      data-level={tile.z + 1}
+                      disabled={locked}
+                      aria-disabled={locked}
+                      aria-label={locked ? "Locked tile" : `Tile ${tile.type}`}
+                      style={{
+                        left: `${tile.x * tileStepX - tile.z * tileDepth}px`,
+                        top: `${tile.y * tileStepY - tile.z * tileDepth}px`,
+                        zIndex: tile.z * 100 + tile.y,
+                      }}
+                      onClick={() => onTileClick(tile.id)}
+                    >
+                      <span className="tile-symbol">{tile.type}</span>
+                      {tile.z > 0 && <span className="tile-level">{tile.z + 1}</span>}
+                    </button>
+                  );
+                })}
+            </div>
           </div>
         </div>
       </section>

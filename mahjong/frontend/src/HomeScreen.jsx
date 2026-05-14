@@ -18,6 +18,13 @@ export default function HomeScreen({
 }) {
   const selectedCustomLayout = customLayouts.find((layout) => String(layout.id) === selectedLayoutId);
   const canStart = selectedMode !== "custom" || Boolean(selectedCustomLayout);
+  const modes = [
+    { id: "classic", label: "Classic layouts", note: "Random board by difficulty" },
+    { id: "daily", label: "Daily task", note: "Today's seeded challenge" },
+    { id: "custom", label: "Custom layout", note: customLayouts.length ? "Use your saved boards" : "No saved boards yet", disabled: customLayouts.length === 0 },
+    { id: "fog", label: "Fog of war", note: "Locked tiles reveal after dependencies" },
+    { id: "no-excuse", label: "No excuse", note: "Mistakes add tiles and reshuffle" },
+  ];
 
   return (
     <div className="home-screen">
@@ -80,29 +87,18 @@ export default function HomeScreen({
             <p className="eyebrow">Layout</p>
             <h3>Choose the board source</h3>
           </div>
-          <div className="choice-grid three">
-            <button
-              className={`choice-button ${selectedMode === "classic" ? "active" : ""}`}
-              onClick={() => onSelectedModeChange("classic")}
-            >
-              <strong>Classic layouts</strong>
-              <span>Random board by difficulty</span>
-            </button>
-            <button
-              className={`choice-button ${selectedMode === "daily" ? "active" : ""}`}
-              onClick={() => onSelectedModeChange("daily")}
-            >
-              <strong>Daily task</strong>
-              <span>Today&apos;s seeded challenge</span>
-            </button>
-            <button
-              className={`choice-button ${selectedMode === "custom" ? "active" : ""}`}
-              onClick={() => onSelectedModeChange("custom")}
-              disabled={customLayouts.length === 0}
-            >
-              <strong>Custom layout</strong>
-              <span>{customLayouts.length ? "Use your saved boards" : "No saved boards yet"}</span>
-            </button>
+          <div className="choice-grid mode-choice-grid">
+            {modes.map((mode) => (
+              <button
+                key={mode.id}
+                className={`choice-button ${selectedMode === mode.id ? "active" : ""}`}
+                onClick={() => onSelectedModeChange(mode.id)}
+                disabled={mode.disabled}
+              >
+                <strong>{mode.label}</strong>
+                <span>{mode.note}</span>
+              </button>
+            ))}
           </div>
 
           {selectedMode === "custom" && (
@@ -118,6 +114,7 @@ export default function HomeScreen({
               </select>
             </div>
           )}
+
 
           <div className="home-actions">
             {user.is_pro && <button className="quiet" onClick={onOpenBuilder}>Layout studio</button>}

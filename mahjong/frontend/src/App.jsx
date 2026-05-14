@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import GameScreen from "./GameScreen";
 import HomeScreen from "./HomeScreen";
+import LeaderboardPage from "./LeaderboardPage";
 import ProfilePage from "./ProfilePage";
 import SharedLayoutsPage from "./SharedLayoutsPage";
 
@@ -18,6 +19,7 @@ const TILE_STEP_Y = 76;
 const TILE_DEPTH = 7;
 const GRID_WIDTH = 14;
 const GRID_HEIGHT = 8;
+const MAX_TILE_LEVELS = 4;
 const TILE_SKINS = [
   { id: "classic", label: "Classic", pro: false },
   { id: "jade", label: "Jade", pro: false },
@@ -194,9 +196,127 @@ function playPairSound() {
   setTimeout(() => context.close().catch(() => {}), 420);
 }
 
+function coordinateKey(tile) {
+  return `${tile.x}:${tile.y}`;
+}
+
+function findTileAt(tiles, x, y, z, ignoreId = null) {
+  return tiles.find((tile) => !tile.removed && tile.id !== ignoreId && tile.x === x && tile.y === y && tile.z === z);
+}
+
+function findFogDependency(tile, tiles, selectedCoordinates) {
+  const selectedIds = new Set(
+    tiles
+      .filter((candidate) => selectedCoordinates.has(coordinateKey(candidate)))
+      .map((candidate) => candidate.id),
+  );
+  const candidates = [
+    findTileAt(tiles, tile.x, tile.y, tile.z + 1, tile.id),
+    findTileAt(tiles, tile.x - 1, tile.y, tile.z, tile.id),
+    findTileAt(tiles, tile.x + 1, tile.y, tile.z, tile.id),
+  ].filter(Boolean);
+  const physicalDependency = candidates.find((candidate) => !selectedIds.has(candidate.id));
+  if (physicalDependency) return physicalDependency;
+
+  return tiles
+    .filter((candidate) => candidate.id !== tile.id && !candidate.removed && !selectedIds.has(candidate.id))
+    .sort((a, b) => {
+      const distanceA = Math.abs(a.x - tile.x) + Math.abs(a.y - tile.y) + Math.abs(a.z - tile.z);
+      const distanceB = Math.abs(b.x - tile.x) + Math.abs(b.y - tile.y) + Math.abs(b.z - tile.z);
+      return distanceA - distanceB;
+    })[0];
+}
+
+function applyFogLocks(tiles) {
+  const topByCoordinate = new Map();
+  tiles
+    .filter((tile) => !tile.removed)
+    .forEach((tile) => {
+      const key = coordinateKey(tile);
+      const current = topByCoordinate.get(key);
+      if (!current || tile.z > current.z) topByCoordinate.set(key, tile);
+    });
+  const candidates = [...topByCoordinate.values()].sort(() => Math.random() - 0.5);
+  const lockCount = Math.min(10, Math.max(4, Math.floor(tiles.length * 0.12)));
+  const selectedTiles = new Map();
+
+  for (const tile of candidates) {
+    if (selectedTiles.size >= lockCount) break;
+    const key = coordinateKey(tile);
+    if (!selectedTiles.has(key)) selectedTiles.set(key, tile);
+  }
+  const selectedCoordinates = new Set([...selectedTiles.keys()]);
+
+  return tiles.map((tile) => {
+    const key = coordinateKey(tile);
+    if (!selectedTiles.has(key) || selectedTiles.get(key).id !== tile.id) {
+      return { ...tile, locked: false, lockedBy: null };
+    }
+
+    const dependency = findFogDependency(tile, tiles, selectedCoordinates);
+    if (!dependency) {
+      return { ...tile, locked: false, lockedBy: null };
+    }
+
+    return { ...tile, locked: true, lockedBy: dependency.id };
+  });
+}
+
+function applyFogToBoard(tiles) {
+  return applyFogLocks(tiles);
+}
+
+function addNoExcusePenaltyTiles(tiles, tileSet) {
+  const active = tiles.filter((tile) => !tile.removed);
+  if (active.length + 2 > GRID_WIDTH * GRID_HEIGHT * MAX_TILE_LEVELS) return tiles;
+
+  const occupied = new Set(active.map((tile) => `${tile.x}:${tile.y}:${tile.z}`));
+  const additions = [];
+  for (let z = 0; z < MAX_TILE_LEVELS && additions.length < 2; z += 1) {
+    for (let y = 0; y < GRID_HEIGHT && additions.length < 2; y += 1) {
+      for (let x = 0; x < GRID_WIDTH && additions.length < 2; x += 1) {
+        const key = `${x}:${y}:${z}`;
+        const hasSupport = z === 0 || occupied.has(`${x}:${y}:${z - 1}`);
+        if (!occupied.has(key) && hasSupport) {
+          occupied.add(key);
+          additions.push({ x, y, z });
+        }
+      }
+    }
+  }
+
+  if (additions.length < 2) return tiles;
+
+  const symbol = tileSet[Math.floor(Math.random() * tileSet.length)] || TILE_SET[0];
+  const nextTiles = [
+    ...tiles,
+    ...additions.map((point, index) => ({
+      id: `penalty-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`,
+      ...point,
+      type: symbol,
+      removed: false,
+      hint: false,
+      locked: false,
+      lockedBy: null,
+    })),
+  ];
+  const nextActive = nextTiles.filter((tile) => !tile.removed);
+  const types = nextActive.map((tile) => tile.type);
+  for (let i = types.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [types[i], types[j]] = [types[j], types[i]];
+  }
+  const shuffled = new Map(nextActive.map((tile, index) => [tile.id, types[index]]));
+  return nextTiles.map((tile) => (tile.removed ? tile : { ...tile, type: shuffled.get(tile.id) || tile.type, hint: false }));
+}
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("mf_token") || "");
   const [theme, setTheme] = useState(localStorage.getItem("mf_theme") || "dark");
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1200 : window.innerWidth));
+  const builderGridRef = useRef(null);
+  const builderPreviewWrapRef = useRef(null);
+  const [builderWidths, setBuilderWidths] = useState({ grid: 0, preview: 0 });
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login");
   const [auth, setAuth] = useState({ username: "", password: "", city: "Almaty" });
@@ -242,6 +362,38 @@ export default function App() {
   }, [tileSkin]);
 
   useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (page !== "builder") return undefined;
+
+    const measure = () => {
+      const nextWidths = {
+        grid: builderGridRef.current?.clientWidth || 0,
+        preview: builderPreviewWrapRef.current?.clientWidth || 0,
+      };
+      setBuilderWidths((current) => {
+        if (current.grid === nextWidths.grid && current.preview === nextWidths.preview) return current;
+        return nextWidths;
+      });
+    };
+
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+
+    const observer = new ResizeObserver(measure);
+    if (builderGridRef.current) observer.observe(builderGridRef.current);
+    if (builderPreviewWrapRef.current) observer.observe(builderPreviewWrapRef.current);
+    return () => observer.disconnect();
+  }, [page, customMask]);
+
+  useEffect(() => {
     if (!user?.is_pro && TILE_SKINS.find((skin) => skin.id === tileSkin)?.pro) {
       setTileSkin("classic");
     }
@@ -253,6 +405,7 @@ export default function App() {
   const isHome = page === "home";
   const isProfile = page === "profile";
   const isShared = page === "shared";
+  const isSocial = page === "social";
 
   async function api(path, options = {}) {
     const { timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options;
@@ -277,8 +430,14 @@ export default function App() {
 
   const hasTileAt = (x, y, z, ignoreId) => board.some((t) => !t.removed && t.id !== ignoreId && t.x === x && t.y === y && t.z === z);
 
+  const isLocked = (tile) => {
+    if (!tile.locked || !tile.lockedBy) return false;
+    return board.some((dependency) => dependency.id === tile.lockedBy && !dependency.removed);
+  };
+
   const isFree = (tile) => {
     if (tile.removed) return false;
+    if (isLocked(tile)) return false;
     if (hasTileAt(tile.x, tile.y, tile.z + 1, tile.id)) return false;
     const left = hasTileAt(tile.x - 1, tile.y, tile.z, tile.id);
     const right = hasTileAt(tile.x + 1, tile.y, tile.z, tile.id);
@@ -317,15 +476,12 @@ export default function App() {
     localStorage.setItem("mf_theme", theme);
   }, [theme]);
 
-  async function loadProfile({ includeRelated = true } = {}) {
+  async function loadProfile() {
     if (!token) return;
     try {
       const me = await api("/me");
       setUser(me);
       setDrawerOpen(false);
-      if (includeRelated) {
-        Promise.all([loadHistory(), loadLeaderboards()]).catch(() => {});
-      }
     } catch {
       setToken("");
       setUser(null);
@@ -335,12 +491,20 @@ export default function App() {
   }
 
   async function refreshAfterGame() {
-    await Promise.all([loadHistory(), loadLeaderboards(), loadProfile({ includeRelated: false })]);
+    await loadProfile();
+    if (page === "profile") {
+      await loadHistory();
+    }
+    if (page === "social") {
+      await loadLeaderboards();
+    }
   }
 
   useEffect(() => {
-    loadProfile();
-  }, [token]);
+    if (token && !user) {
+      loadProfile();
+    }
+  }, [token, user]);
 
   useEffect(() => {
     if (user?.is_pro) {
@@ -353,6 +517,18 @@ export default function App() {
   useEffect(() => {
     if (page === "shared") {
       loadSharedLayouts().catch(() => {});
+    }
+  }, [page, user]);
+
+  useEffect(() => {
+    if (page === "profile" && user) {
+      loadHistory().catch(() => {});
+    }
+  }, [page, user]);
+
+  useEffect(() => {
+    if (page === "social" && user) {
+      loadLeaderboards().catch(() => {});
     }
   }, [page, user]);
 
@@ -576,10 +752,11 @@ export default function App() {
     const nextBoard = customLayout
       ? generateCustomBoard(customLayout.mask, customLayout.name, seed, tileSet)
       : generateBoard(difficulty, seed, tileSet);
+    const nextTiles = nextMode === "fog" ? applyFogToBoard(nextBoard.tiles) : nextBoard.tiles;
     setMode(customLayout ? "custom" : nextMode);
     setActiveCustomLayout(customLayout ?? null);
-    setLayoutName(nextBoard.name);
-    setBoard(nextBoard.tiles);
+    setLayoutName(nextMode === "fog" ? `${nextBoard.name} · Fog of war` : nextMode === "no-excuse" ? `${nextBoard.name} · No excuse` : nextBoard.name);
+    setBoard(nextTiles);
     setSelected([]);
     setUndoStack([]);
     setMoves(0);
@@ -620,6 +797,9 @@ export default function App() {
         authMode === "register" ? { ...auth, username: u, password: p } : { username: u, password: p };
       const data = await api(path, { method: "POST", body: JSON.stringify(payload) });
       setDrawerOpen(false);
+      if (data.user) {
+        setUser(data.user);
+      }
       setToken(data.token);
       localStorage.setItem("mf_token", data.token);
     } catch (err) {
@@ -629,7 +809,7 @@ export default function App() {
 
   async function onTileClick(tileId) {
     const tile = board.find((t) => t.id === tileId);
-    if (!tile || !isFree(tile)) return;
+    if (!tile || isLocked(tile) || !isFree(tile)) return;
     const picks = selected.includes(tileId) ? selected.filter((id) => id !== tileId) : [...selected, tileId].slice(-2);
     setSelected(picks);
     if (picks.length !== 2) return;
@@ -664,6 +844,11 @@ export default function App() {
           .catch(() => {});
       }
     } else {
+      if (mode === "no-excuse") {
+        const tileSet = TILE_SETS[tileSkin] || TILE_SET;
+        setBoard((prev) => addNoExcusePenaltyTiles(prev, tileSet));
+      }
+      setSelected([]);
       setScore((v) => Math.max(0, v - 10));
     }
   }
@@ -676,9 +861,8 @@ export default function App() {
       [types[i], types[j]] = [types[j], types[i]];
     }
     const shuffledTypes = new Map(active.map((tile, index) => [tile.id, types[index]]));
-    setBoard((prev) =>
-      prev.map((t) => (t.removed ? t : { ...t, type: shuffledTypes.get(t.id) || t.type, hint: false })),
-    );
+    const shuffled = board.map((t) => (t.removed ? t : { ...t, type: shuffledTypes.get(t.id) || t.type, hint: false }));
+    setBoard(shuffled);
     setMoves((v) => v + 1);
     setScore((v) => Math.max(0, v - 35));
   }
@@ -761,6 +945,22 @@ export default function App() {
     );
   const builderPreviewMaxX = Math.max(...builderPreviewTiles.map((tile) => tile.x), 0);
   const builderPreviewMaxY = Math.max(...builderPreviewTiles.map((tile) => tile.y), 0);
+  const isCompactBuilder = viewportWidth <= 680;
+  const builderCellGap = isCompactBuilder ? 3 : 6;
+  const builderGridPadding = isCompactBuilder ? 20 : 40;
+  const builderAvailableWidth = Math.max(220, (builderWidths.grid || viewportWidth - 72) - builderGridPadding - 4);
+  const builderCellSize =
+    isCompactBuilder
+      ? Math.max(18, Math.min(30, Math.floor((builderAvailableWidth - builderCellGap * (GRID_WIDTH - 1)) / GRID_WIDTH)))
+      : 30;
+  const builderPreviewBoardWidth = (builderPreviewMaxX + 2) * TILE_STEP_X;
+  const builderPreviewBoardHeight = Math.max(500, (builderPreviewMaxY + 2) * TILE_STEP_Y);
+  const builderPreviewPadding = isCompactBuilder ? 20 : 36;
+  const builderPreviewAvailableWidth = Math.max(180, (builderWidths.preview || viewportWidth - 96) - builderPreviewPadding - 4);
+  const builderPreviewScale =
+    viewportWidth <= 760
+      ? Math.min(0.74, builderPreviewAvailableWidth / builderPreviewBoardWidth)
+      : 0.74;
   const pageTitle = isBuilder
     ? "Pro board designer"
     : isHome
@@ -769,6 +969,8 @@ export default function App() {
         ? "Profile"
         : isShared
           ? "Shared layouts"
+          : isSocial
+            ? "Leaderboards"
       : mode === "daily"
         ? "Daily board"
         : "Mahjong board";
@@ -782,15 +984,10 @@ export default function App() {
           <h1>{pageTitle}</h1>
         </div>
         <div className="topbar-actions">
-          {page !== "home"  && (
-            <button className="topbar-button" onClick={goHome}>Home</button>
-          )}
-          {(page !== "profile" && page !== "play") && (
-            <button className="topbar-button" onClick={() => setPage("profile")}>Profile</button>
-          )}
-          {(page !== "shared" && page !== "play") && (
-            <button className="topbar-button" onClick={() => setPage("shared")}>Shared layouts</button>
-          )}
+          <button className="topbar-button" onClick={goHome}>Home</button>
+          <button className="topbar-button" onClick={() => setPage("profile")}>Profile</button>
+          <button className="topbar-button" onClick={() => setPage("shared")}>Shared layouts</button>
+          <button className="topbar-button" onClick={() => setPage("social")}>Leaderboards</button>
           {page !== "play"  && (
             <button className="menu-button" onClick={() => setDrawerOpen(true)} aria-label="Open menu">
             <span></span>
@@ -801,7 +998,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className={isHome || isProfile || isShared ? "content-shell" : "game-shell"}>
+      <main className={isHome || isProfile || isShared || isSocial ? "content-shell" : "game-shell"}>
         {isHome ? (
           <HomeScreen
             user={user}
@@ -836,7 +1033,6 @@ export default function App() {
             <div className="board-toolbar">
               <div>
                 <p className="eyebrow">Community board hall</p>
-                <h2>Shared layouts</h2>
               </div>
             </div>
             <div className="board-wrap">
@@ -848,18 +1044,33 @@ export default function App() {
               />
             </div>
           </section>
+        ) : isSocial ? (
+          <LeaderboardPage
+            leaderboard={leaderboard}
+            cities={cities}
+            cityFilter={cityFilter}
+            onCityFilterChange={setCityFilter}
+            onApplyFilter={loadLeaderboards}
+          />
         ) : isBuilder ? (
           <>
             <section className="board-panel">
           <div className="board-toolbar">
             <div>
               <p className="eyebrow">Design mode</p>
-              <h2>{customName}</h2>
+              <h2>Custom</h2>
             </div>
           </div>
 
           <div className="board-wrap">
-              <div className="builder-grid" style={{ gridTemplateColumns: `repeat(${GRID_WIDTH}, 30px)` }}>
+              <div
+                className="builder-grid"
+                ref={builderGridRef}
+                style={{
+                  gridTemplateColumns: `repeat(${GRID_WIDTH}, ${builderCellSize}px)`,
+                  gap: `${builderCellGap}px`,
+                }}
+              >
                 {Array.from({ length: GRID_HEIGHT }).map((_, rowIdx) =>
                   Array.from({ length: GRID_WIDTH }).map((_, colIdx) => {
                     const level = customMask.reduce((topLevel, levelRows, levelIdx) => (levelRows[rowIdx][colIdx] === "#" ? levelIdx : topLevel), -1);
@@ -880,35 +1091,44 @@ export default function App() {
               <div className="builder-preview-panel">
                 <div className="section-title">
                   <p className="eyebrow">Preview</p>
-                  <h3>{customName}</h3>
                 </div>
                 {builderPreviewTiles.length === 0 ? (
                   <div className="builder-preview-empty">Place tiles to preview the playable board.</div>
                 ) : (
-                  <div className="builder-real-preview-wrap">
+                  <div className="builder-real-preview-wrap" ref={builderPreviewWrapRef}>
                     <div
-                      className="board builder-real-preview-board"
+                      className="board-stage builder-preview-stage"
                       style={{
-                        width: `${(builderPreviewMaxX + 2) * TILE_STEP_X}px`,
-                        height: `${(builderPreviewMaxY + 2) * TILE_STEP_Y}px`,
+                        "--board-scale": builderPreviewScale,
+                        "--board-height": `${builderPreviewBoardHeight}px`,
+                        width: `${builderPreviewBoardWidth * builderPreviewScale}px`,
+                        height: `${builderPreviewBoardHeight * builderPreviewScale}px`,
                       }}
                     >
-                      {builderPreviewTiles
-                        .sort((a, b) => a.z - b.z)
-                        .map((tile) => (
-                          <div
-                            key={tile.id}
-                            className={`tile skin-${tileSkin} layer-${tile.z} builder-preview-tile`}
-                            style={{
-                              left: `${tile.x * TILE_STEP_X - tile.z * TILE_DEPTH}px`,
-                              top: `${tile.y * TILE_STEP_Y - tile.z * TILE_DEPTH}px`,
-                              zIndex: tile.z * 100 + tile.y,
-                            }}
-                          >
-                            <span className="tile-symbol">{tile.type}</span>
-                            {tile.z > 0 && <span className="tile-level">{tile.z + 1}</span>}
-                          </div>
-                        ))}
+                      <div
+                        className="board builder-real-preview-board"
+                        style={{
+                          width: `${builderPreviewBoardWidth}px`,
+                          height: `${builderPreviewBoardHeight}px`,
+                        }}
+                      >
+                        {builderPreviewTiles
+                          .sort((a, b) => a.z - b.z)
+                          .map((tile) => (
+                            <div
+                              key={tile.id}
+                              className={`tile skin-${tileSkin} layer-${tile.z} builder-preview-tile`}
+                              style={{
+                                left: `${tile.x * TILE_STEP_X - tile.z * TILE_DEPTH}px`,
+                                top: `${tile.y * TILE_STEP_Y - tile.z * TILE_DEPTH}px`,
+                                zIndex: tile.z * 100 + tile.y,
+                              }}
+                            >
+                              <span className="tile-symbol">{tile.type}</span>
+                              {tile.z > 0 && <span className="tile-level">{tile.z + 1}</span>}
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -987,6 +1207,7 @@ export default function App() {
               maxY={maxY}
               tileSkin={tileSkin}
               isFree={isFree}
+              isLocked={isLocked}
               selected={selected}
               onTileClick={onTileClick}
               tileStepX={TILE_STEP_X}
@@ -1018,32 +1239,6 @@ export default function App() {
           </div>
           <button className="close-button" onClick={() => setDrawerOpen(false)} aria-label="Close menu">×</button>
         </div>
-
-        <section className="drawer-section">
-          <h3>Daily leaderboard</h3>
-          <ul className="list">
-            {leaderboard.length === 0 && <li>No records today.</li>}
-            {leaderboard.map((entry, idx) => (
-              <li key={`${entry.username}-${idx}`}>#{idx + 1} {entry.username} ({entry.city}) · {entry.score} pts / {entry.time_seconds}s</li>
-            ))}
-          </ul>
-        </section>
-
-
-        <section className="drawer-section">
-          <h3>Social filter</h3>
-          <div className="filter-row">
-            <input placeholder="City" value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} />
-            <button onClick={loadLeaderboards}>Apply</button>
-          </div>
-          <ul className="list compact-list">
-            {cities.length === 0 && <li>No city data.</li>}
-            {cities.map((city, idx) => (
-              <li key={`${city.city}-${idx}`}>#{idx + 1} {city.city} · best {city.best_score} pts in {city.best_time}s</li>
-            ))}
-          </ul>
-        </section>
-
 
         <div className="drawer-actions">
           <button className="quiet" onClick={() => setTheme((v) => (v === "dark" ? "light" : "dark"))}>Theme</button>

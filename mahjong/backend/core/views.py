@@ -163,6 +163,25 @@ def mask_to_points(mask):
     return 0
 
 
+def user_payload(user):
+    profile, _ = Profile.objects.get_or_create(user=user, defaults={"city": "Almaty"})
+    achievements = compute_achievements(user)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "city": profile.city,
+        "is_pro": profile.is_pro,
+        "xp": achievements["xp"],
+        "rank": achievements["rank"],
+        "next_rank_xp": achievements["next_rank_xp"],
+        "total_wins": achievements["total_wins"],
+        "classic_wins": achievements["classic_wins"],
+        "daily_wins": achievements["daily_wins"],
+        "layout_count": achievements["layout_count"],
+        "achievements": achievements["achievements"],
+    }
+
+
 @require_GET
 def health(request):
     return JsonResponse({"status": "ok"})
@@ -201,7 +220,7 @@ def register(request):
         return JsonResponse({"detail": " ".join(msgs)}, status=400)
     except ValueError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
-    return JsonResponse({"token": token})
+    return JsonResponse({"token": token, "user": user_payload(user)})
 
 
 @csrf_exempt
@@ -217,7 +236,7 @@ def login(request):
         return JsonResponse({"detail": "Invalid credentials"}, status=401)
     token = secrets.token_hex(24)
     AuthToken.objects.create(user=user, token=token)
-    return JsonResponse({"token": token})
+    return JsonResponse({"token": token, "user": user_payload(user)})
 
 
 @require_GET
@@ -225,22 +244,7 @@ def me(request):
     user = auth_user(request)
     if not user:
         return JsonResponse({"detail": "Unauthorized"}, status=401)
-    profile, _ = Profile.objects.get_or_create(user=user, defaults={"city": "Almaty"})
-    achievements = compute_achievements(user)
-    return JsonResponse({
-        "id": user.id,
-        "username": user.username,
-        "city": profile.city,
-        "is_pro": profile.is_pro,
-        "xp": achievements["xp"],
-        "rank": achievements["rank"],
-        "next_rank_xp": achievements["next_rank_xp"],
-        "total_wins": achievements["total_wins"],
-        "classic_wins": achievements["classic_wins"],
-        "daily_wins": achievements["daily_wins"],
-        "layout_count": achievements["layout_count"],
-        "achievements": achievements["achievements"],
-    })
+    return JsonResponse(user_payload(user))
 
 
 @csrf_exempt

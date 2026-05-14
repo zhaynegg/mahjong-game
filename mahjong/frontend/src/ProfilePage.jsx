@@ -12,7 +12,6 @@ export default function ProfilePage({ user, history }) {
     <div className="profile-page">
       <section className="profile-hero panel">
         <div className="hero-info">
-          <p className="eyebrow">Player profile</p>
           <h2>{user.username}</h2>
           <p className="hero-tag">{user.city} · {user.rank || "Rookie"}</p>
         </div>
