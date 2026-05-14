@@ -7,26 +7,32 @@ function formatProgress(xp, next) {
 export default function ProfilePage({ user, history }) {
   const progress = formatProgress(user.xp ?? 0, user.next_rank_xp);
   const completedAchievements = (user.achievements || []).filter((item) => item.unlocked).length;
+  const initials = (user.username || "MF").slice(0, 2).toUpperCase();
+  const winSplit = `${user.classic_wins ?? 0} classic · ${user.daily_wins ?? 0} daily`;
 
   return (
     <div className="profile-page">
       <section className="profile-hero panel">
-        <div className="hero-info">
-          <h2>{user.username}</h2>
-          <p className="hero-tag">{user.city} · {user.rank || "Rookie"}</p>
+        <div className="profile-identity">
+          <div className="profile-avatar">{initials}</div>
+          <div className="hero-info">
+            <h2>{user.username}</h2>
+            <p className="hero-tag">{user.city} · {user.rank || "Rookie"}</p>
+          </div>
         </div>
         <div className="hero-stats">
           <div className="hero-card">
-            <span>XP:</span>
+            <span>XP</span>
             <strong>{user.xp ?? 0}</strong>
           </div>
           <div className="hero-card">
-            <span>Layouts:</span>
+            <span>Layouts</span>
             <strong>{user.layout_count ?? 0}</strong>
           </div>
           <div className="hero-card">
-            <span>Wins:</span>
+            <span>Wins</span>
             <strong>{user.total_wins ?? 0}</strong>
+            <small>{winSplit}</small>
           </div>
         </div>
       </section>
@@ -38,11 +44,11 @@ export default function ProfilePage({ user, history }) {
         </div>
         <div className="rank-card">
           <div>
-            <span>Current rank:</span>
+            <span>Current rank</span>
             <strong>{user.rank || "Rookie"}</strong>
           </div>
           <div>
-            <span>Next level:</span>
+            <span>Next level</span>
             <strong>{user.next_rank_xp ? `${user.next_rank_xp} XP` : "Maxed"}</strong>
           </div>
         </div>
@@ -84,9 +90,13 @@ export default function ProfilePage({ user, history }) {
             {history.slice(0, 8).map((item, idx) => (
               <li key={`${item.created_at}-${idx}`}>
                 <div>
-                  <strong>{item.mode}</strong> · {item.difficulty}
+                  <span className={`run-dot ${item.won ? "won" : "lost"}`} />
+                  <div>
+                    <strong>{item.mode}</strong>
+                    <small>{item.difficulty}</small>
+                  </div>
                 </div>
-                <div>{item.won ? `Win in ${item.time_seconds}s` : "Lost"}</div>
+                <div>{item.won ? `${item.score} pts · ${item.time_seconds}s` : "Lost"}</div>
               </li>
             ))}
           </ul>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import DailyChallengePage from "./DailyChallengePage";
 import GameScreen from "./GameScreen";
 import HomeScreen from "./HomeScreen";
-import LeaderboardPage from "./LeaderboardPage";
 import ProfilePage from "./ProfilePage";
 import SharedLayoutsPage from "./SharedLayoutsPage";
 
@@ -266,6 +266,33 @@ function applyFogToBoard(tiles) {
   return applyFogLocks(tiles);
 }
 
+function pointKey(point) {
+  return `${point.x}:${point.y}:${point.z}`;
+}
+
+function applySelectedFogLocks(tiles, lockedTiles = []) {
+  const requestedLocks = new Set(lockedTiles.map(pointKey));
+  if (requestedLocks.size === 0) return applyFogToBoard(tiles);
+  const selectedCoordinates = new Set(
+    tiles
+      .filter((tile) => requestedLocks.has(pointKey(tile)))
+      .map((tile) => coordinateKey(tile)),
+  );
+
+  return tiles.map((tile) => {
+    if (!requestedLocks.has(pointKey(tile))) {
+      return { ...tile, locked: false, lockedBy: null };
+    }
+
+    const dependency = findFogDependency(tile, tiles, selectedCoordinates);
+    if (!dependency) {
+      return { ...tile, locked: false, lockedBy: null };
+    }
+
+    return { ...tile, locked: true, lockedBy: dependency.id };
+  });
+}
+
 function addNoExcusePenaltyTiles(tiles, tileSet) {
   const active = tiles.filter((tile) => !tile.removed);
   if (active.length + 2 > GRID_WIDTH * GRID_HEIGHT * MAX_TILE_LEVELS) return tiles;
@@ -338,6 +365,9 @@ export default function App() {
   const [customLayouts, setCustomLayouts] = useState([]);
   const [customName, setCustomName] = useState("My layout");
   const [customMask, setCustomMask] = useState(Array.from({ length: 4 }, () => Array.from({ length: GRID_HEIGHT }, () => ".".repeat(GRID_WIDTH))));
+  const [customPlayMode, setCustomPlayMode] = useState("classic");
+  const [customFogLocks, setCustomFogLocks] = useState([]);
+  const [builderTool, setBuilderTool] = useState("tiles");
   const [activeCustomLayout, setActiveCustomLayout] = useState(null);
   const [builderStatus, setBuilderStatus] = useState("");
   const [board, setBoard] = useState([]);
@@ -351,6 +381,8 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [cities, setCities] = useState([]);
+  const [dailySummary, setDailySummary] = useState(null);
+  const [dailyLoading, setDailyLoading] = useState(false);
   const [sharedLayouts, setSharedLayouts] = useState([]);
   const [sharedLoading, setSharedLoading] = useState(false);
   const [coach, setCoach] = useState("AI Coach is ready.");
@@ -401,11 +433,22 @@ export default function App() {
       setTileSkin("classic");
     }
   }, [user, tileSkin]);
+
+  useEffect(() => {
+    if (customPlayMode !== "fog") {
+      setBuilderTool("tiles");
+    }
+  }, [customPlayMode]);
+
+  useEffect(() => {
+    const validKeys = new Set(maskToPoints(customMask).map(pointKey));
+    setCustomFogLocks((current) => current.filter((point) => validKeys.has(pointKey(point))));
+  }, [customMask]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isHome = page === "home";
   const isProfile = page === "profile";
   const isShared = page === "shared";
-  const isSocial = page === "social";
+  const isDailyPage = page === "daily-challenge";
 
   async function api(path, options = {}) {
     const { timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options;
@@ -495,8 +538,8 @@ export default function App() {
     if (page === "profile") {
       await loadHistory();
     }
-    if (page === "social") {
-      await loadLeaderboards();
+    if (page === "daily-challenge") {
+      await loadDailyPageData();
     }
   }
 
@@ -527,8 +570,8 @@ export default function App() {
   }, [page, user]);
 
   useEffect(() => {
-    if (page === "social" && user) {
-      loadLeaderboards().catch(() => {});
+    if (page === "daily-challenge" && user) {
+      loadDailyPageData().catch(() => {});
     }
   }, [page, user]);
 
@@ -542,6 +585,20 @@ export default function App() {
     const [daily, cityData] = await Promise.all([api(`/leaderboard/daily${query}`), api("/leaderboard/cities")]);
     setLeaderboard(daily.items);
     setCities(cityData.items);
+  }
+
+  async function loadDailySummary() {
+    const data = await api("/daily/summary");
+    setDailySummary(data);
+  }
+
+  async function loadDailyPageData() {
+    setDailyLoading(true);
+    try {
+      await Promise.all([loadDailySummary(), loadLeaderboards()]);
+    } finally {
+      setDailyLoading(false);
+    }
   }
 
   async function loadSharedLayouts() {
@@ -626,6 +683,8 @@ export default function App() {
 
   const points = maskToPoints(customMask);
   const trimmedName = customName.trim();
+  const validLockKeys = new Set(points.map(pointKey));
+  const normalizedLocks = customFogLocks.filter((point) => validLockKeys.has(pointKey(point)));
 
   if (!trimmedName) {
     setBuilderStatus("Layout name is required.");
@@ -645,6 +704,8 @@ export default function App() {
   const payload = {
     name: trimmedName,
     mask: customMask,
+    play_mode: customPlayMode,
+    locked_tiles: customPlayMode === "fog" ? normalizedLocks : [],
   };
 
   try {
@@ -682,7 +743,13 @@ export default function App() {
       setBuilderStatus("Tile count must be even.");
       return;
     }
-    startGame("custom", { name: customName.trim() || "My layout", mask: customMask });
+    const validLockKeys = new Set(customPoints.map(pointKey));
+    startGame("custom", {
+      name: customName.trim() || "My layout",
+      mask: customMask,
+      play_mode: customPlayMode,
+      locked_tiles: customPlayMode === "fog" ? customFogLocks.filter((point) => validLockKeys.has(pointKey(point))) : [],
+    });
   }
 
   function clearLevel() {
@@ -696,6 +763,11 @@ export default function App() {
   }
 
   function toggleMaskBuilderCell(x, y) {
+    if (customPlayMode === "fog" && builderTool === "locks") {
+      toggleFogLock(x, y);
+      return;
+    }
+
     setCustomMask((prev) => {
       const currentHeight = prev.reduce((height, levelRows) => height + (levelRows[y][x] === "#" ? 1 : 0), 0);
       const nextHeight = (currentHeight + 1) % (prev.length + 1);
@@ -713,8 +785,25 @@ export default function App() {
     setBuilderStatus("");
   }
 
+  function toggleFogLock(x, y) {
+    const topZ = customMask.reduce((topLevel, levelRows, levelIdx) => (levelRows[y][x] === "#" ? levelIdx : topLevel), -1);
+    if (topZ < 0) {
+      setBuilderStatus("Place a tile before marking it as blocked.");
+      return;
+    }
+    const nextPoint = { x, y, z: topZ };
+    const nextKey = pointKey(nextPoint);
+    setCustomFogLocks((prev) =>
+      prev.some((point) => pointKey(point) === nextKey)
+        ? prev.filter((point) => pointKey(point) !== nextKey)
+        : [...prev, nextPoint],
+    );
+    setBuilderStatus("");
+  }
+
   function clearMask() {
     setCustomMask(Array.from({ length: 4 }, () => Array.from({ length: GRID_HEIGHT }, () => ".".repeat(GRID_WIDTH))));
+    setCustomFogLocks([]);
     setBuilderStatus("");
   }
 
@@ -744,18 +833,22 @@ export default function App() {
   }, [availablePairs, board.length, user]);
 
   function startGame(nextMode, customLayout = null) {
+    const effectiveMode = customLayout?.play_mode || nextMode;
     let seed = Math.floor(Math.random() * 1_000_000);
-    if (nextMode === "daily") {
+    if (effectiveMode === "daily") {
       seed = dailySeed();
     }
     const tileSet = TILE_SETS[tileSkin] || TILE_SET;
     const nextBoard = customLayout
       ? generateCustomBoard(customLayout.mask, customLayout.name, seed, tileSet)
       : generateBoard(difficulty, seed, tileSet);
-    const nextTiles = nextMode === "fog" ? applyFogToBoard(nextBoard.tiles) : nextBoard.tiles;
-    setMode(customLayout ? "custom" : nextMode);
+    const nextTiles =
+      effectiveMode === "fog"
+        ? applySelectedFogLocks(nextBoard.tiles, customLayout?.locked_tiles || [])
+        : nextBoard.tiles;
+    setMode(effectiveMode);
     setActiveCustomLayout(customLayout ?? null);
-    setLayoutName(nextMode === "fog" ? `${nextBoard.name} · Fog of war` : nextMode === "no-excuse" ? `${nextBoard.name} · No excuse` : nextBoard.name);
+    setLayoutName(effectiveMode === "fog" ? `${nextBoard.name} · Fog of war` : effectiveMode === "no-excuse" ? `${nextBoard.name} · No excuse` : nextBoard.name);
     setBoard(nextTiles);
     setSelected([]);
     setUndoStack([]);
@@ -776,6 +869,11 @@ export default function App() {
       return;
     }
     startGame(homeMode);
+  }
+
+  function startDailyChallenge() {
+    setDifficulty("medium");
+    startGame("daily");
   }
 
   async function submitAuth() {
@@ -828,17 +926,18 @@ export default function App() {
       if (nextBoard.every((t) => t.removed)) {
         const finalTime = Math.floor((Date.now() - startedAt) / 1000);
         const finalScore = score + 120 + Math.max(0, 500 - finalTime * 2);
+        const resultMode = activeCustomLayout ? "custom" : mode;
         setScore(finalScore);
         setVictory({
           score: finalScore,
           time: finalTime,
           moves: moves + 1,
-          mode,
+          mode: resultMode,
           difficulty,
         });
         api("/game/result", {
           method: "POST",
-          body: JSON.stringify({ mode, difficulty, score: finalScore, time_seconds: finalTime, won: true, hints_used: hintsUsed }),
+          body: JSON.stringify({ mode: resultMode, difficulty, score: finalScore, time_seconds: finalTime, won: true, hints_used: hintsUsed }),
         })
           .then(refreshAfterGame)
           .catch(() => {});
@@ -932,6 +1031,7 @@ export default function App() {
       return { x: colIdx, y: rowIdx, level };
     }),
   );
+  const customFogLockKeys = new Set(customFogLocks.map(pointKey));
   const builderPreviewTiles = builderPreviewCells
     .filter((cell) => cell.level >= 0)
     .flatMap((cell) =>
@@ -941,6 +1041,7 @@ export default function App() {
         y: cell.y,
         z,
         type: TILE_SET[(cell.y * GRID_WIDTH + cell.x + z) % TILE_SET.length],
+        locked: customPlayMode === "fog" && customFogLockKeys.has(pointKey({ x: cell.x, y: cell.y, z })),
       })),
     );
   const builderPreviewMaxX = Math.max(...builderPreviewTiles.map((tile) => tile.x), 0);
@@ -969,11 +1070,11 @@ export default function App() {
         ? "Profile"
         : isShared
           ? "Shared layouts"
-          : isSocial
-            ? "Leaderboards"
-      : mode === "daily"
-        ? "Daily board"
-        : "Mahjong board";
+          : isDailyPage
+            ? "Daily / Rankings"
+            : mode === "daily"
+              ? "Daily board"
+              : "Mahjong board";
 
   return (
 
@@ -985,9 +1086,13 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           <button className="topbar-button" onClick={goHome}>Home</button>
-          <button className="topbar-button" onClick={() => setPage("profile")}>Profile</button>
-          <button className="topbar-button" onClick={() => setPage("shared")}>Shared layouts</button>
-          <button className="topbar-button" onClick={() => setPage("social")}>Leaderboards</button>
+          {page !== "play" && (
+            <>
+              <button className="topbar-button" onClick={() => setPage("daily-challenge")}>Daily / Rankings</button>
+              <button className="topbar-button" onClick={() => setPage("profile")}>Profile</button>
+              <button className="topbar-button" onClick={() => setPage("shared")}>Shared layouts</button>
+            </>
+          )}
           {page !== "play"  && (
             <button className="menu-button" onClick={() => setDrawerOpen(true)} aria-label="Open menu">
             <span></span>
@@ -998,7 +1103,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className={isHome || isProfile || isShared || isSocial ? "content-shell" : "game-shell"}>
+      <main className={isHome || isProfile || isShared || isDailyPage ? "content-shell" : "game-shell"}>
         {isHome ? (
           <HomeScreen
             user={user}
@@ -1019,10 +1124,6 @@ export default function App() {
         ) : isProfile ? (
           <section className="board-panel">
             <div className="board-toolbar">
-              <div>
-                <p className="eyebrow">Profile</p>
-                <h2>Player profile</h2>
-              </div>
             </div>
             <div className="board-wrap">
               <ProfilePage user={user} history={history} customLayouts={customLayouts} />
@@ -1044,13 +1145,16 @@ export default function App() {
               />
             </div>
           </section>
-        ) : isSocial ? (
-          <LeaderboardPage
+        ) : isDailyPage ? (
+          <DailyChallengePage
+            summary={dailySummary}
+            loading={dailyLoading}
             leaderboard={leaderboard}
             cities={cities}
             cityFilter={cityFilter}
             onCityFilterChange={setCityFilter}
             onApplyFilter={loadLeaderboards}
+            onStart={startDailyChallenge}
           />
         ) : isBuilder ? (
           <>
@@ -1078,11 +1182,11 @@ export default function App() {
                     return (
                       <button
                         key={`${rowIdx}-${colIdx}`}
-                        className={`builder-cell ${level !== -1 ? "filled" : ""}`}
+                        className={`builder-cell ${level !== -1 ? "filled" : ""} ${customPlayMode === "fog" && level >= 0 && customFogLockKeys.has(pointKey({ x: colIdx, y: rowIdx, z: level })) ? "blocked" : ""}`}
                         onClick={() => toggleMaskBuilderCell(colIdx, rowIdx)}
                         aria-label={`Change tile level at row ${rowIdx + 1}, col ${colIdx + 1}`}
                       >
-                        {level !== -1 ? `L${level + 1}` : ""}
+                        {customPlayMode === "fog" && level >= 0 && customFogLockKeys.has(pointKey({ x: colIdx, y: rowIdx, z: level })) ? "LOCK" : level !== -1 ? `L${level + 1}` : ""}
                       </button>
                     );
                   }),
@@ -1117,7 +1221,7 @@ export default function App() {
                           .map((tile) => (
                             <div
                               key={tile.id}
-                              className={`tile skin-${tileSkin} layer-${tile.z} builder-preview-tile`}
+                              className={`tile skin-${tileSkin} layer-${tile.z} builder-preview-tile ${tile.locked ? "locked" : ""}`}
                               style={{
                                 left: `${tile.x * TILE_STEP_X - tile.z * TILE_DEPTH}px`,
                                 top: `${tile.y * TILE_STEP_Y - tile.z * TILE_DEPTH}px`,
@@ -1144,6 +1248,31 @@ export default function App() {
                 </div>
                 <label>Layout name</label>
                 <input value={customName} onChange={(e) => setCustomName(e.target.value)} />
+                <label>Game mode</label>
+                <div className="builder-mode-grid">
+                  {[
+                    { id: "classic", label: "Classic" },
+                    { id: "fog", label: "Fog of war" },
+                    { id: "no-excuse", label: "No excuse" },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      className={`quiet ${customPlayMode === item.id ? "active" : ""}`}
+                      onClick={() => setCustomPlayMode(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                {customPlayMode === "fog" && (
+                  <>
+                    <label>Builder tool</label>
+                    <div className="builder-mode-grid two">
+                      <button className={`quiet ${builderTool === "tiles" ? "active" : ""}`} onClick={() => setBuilderTool("tiles")}>Tiles</button>
+                      <button className={`quiet ${builderTool === "locks" ? "active" : ""}`} onClick={() => setBuilderTool("locks")}>Blocked tiles</button>
+                    </div>
+                  </>
+                )}
                 <div
                     className="button-grid three"
                     style={{ marginBottom: "14px" }}
@@ -1154,6 +1283,8 @@ export default function App() {
                 </div>
                 <div className="stat-grid">
                   <div><span>Tiles placed</span><strong>{customPoints.length}</strong></div>
+                  <div><span>Mode</span><strong>{customPlayMode === "fog" ? "Fog" : customPlayMode === "no-excuse" ? "No excuse" : "Classic"}</strong></div>
+                  <div><span>Blocked</span><strong>{customPlayMode === "fog" ? customFogLocks.length : 0}</strong></div>
                   <div><span>Board density</span><strong>{builderProgress}%</strong></div>
                   <div><span>Grid size</span><strong>{GRID_WIDTH}×{GRID_HEIGHT}</strong></div>
                   <div><span>Layout</span><strong>{customName}</strong></div>
@@ -1182,7 +1313,10 @@ export default function App() {
                   <ul className="list">
                     {customLayouts.map((layout) => (
                       <li key={layout.id}>
-                        <div>{layout.name}</div>
+                        <div>
+                          <strong>{layout.name}</strong>
+                          <small className="muted">{layout.play_mode === "fog" ? `Fog · ${(layout.locked_tiles || []).length} blocked` : layout.play_mode === "no-excuse" ? "No excuse" : "Classic"}</small>
+                        </div>
                         <div className="button-grid two" style={{ marginTop: "8px" }}>
                           <button className="quiet" onClick={() => { setPage("play"); setDrawerOpen(false); startGame("custom", layout); }}>Play</button>
                           <button className="quiet" onClick={() => toggleLayoutShare(layout.id, !layout.is_shared)}>
@@ -1315,7 +1449,7 @@ export default function App() {
           onClick={() => {
             setVictory(null);
 
-            if (mode === "custom") {
+            if (activeCustomLayout) {
               startGame("custom", activeCustomLayout ?? {
                 name: customName,
                 mask: customMask,
@@ -1328,7 +1462,7 @@ export default function App() {
           Play again
         </button>
       </div>
-      {mode === "custom" && activeCustomLayout?.id && activeCustomLayout?.shared && (
+      {activeCustomLayout?.id && activeCustomLayout?.shared && (
         <div className="victory-rating">
           <p className="eyebrow">Rate this layout</p>
           {victory.rated ? (

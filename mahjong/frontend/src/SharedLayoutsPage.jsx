@@ -9,6 +9,16 @@ function formatNumber(value) {
   return new Intl.NumberFormat("en-US").format(value || 0);
 }
 
+function formatMode(mode) {
+  if (mode === "fog") return "Fog of war";
+  if (mode === "no-excuse") return "No excuse";
+  return "Classic";
+}
+
+function pointKey(point) {
+  return `${point.x}:${point.y}:${point.z}`;
+}
+
 function maskToPreviewCells(mask) {
   if (!Array.isArray(mask) || mask.length === 0) return [];
   const levels = Array.isArray(mask[0]) ? mask : [mask];
@@ -31,6 +41,7 @@ function maskToPreviewCells(mask) {
 
 function LayoutPreview({ layout }) {
   const preview = maskToPreviewCells(layout.mask);
+  const lockedKeys = new Set((layout.locked_tiles || []).map(pointKey));
   if (!preview.cells?.length) {
     return <div className="layout-preview empty">No preview</div>;
   }
@@ -46,7 +57,8 @@ function LayoutPreview({ layout }) {
       {preview.cells.map((cell) => (
         <span
           key={`${cell.x}-${cell.y}`}
-          className={`preview-cell ${cell.level >= 0 ? "filled" : ""} level-${cell.level + 1}`}
+          title={lockedKeys.has(pointKey({ x: cell.x, y: cell.y, z: cell.level })) ? "Blocked in Fog of War" : undefined}
+          className={`preview-cell ${cell.level >= 0 ? "filled" : ""} level-${cell.level + 1} ${lockedKeys.has(pointKey({ x: cell.x, y: cell.y, z: cell.level })) ? "blocked" : ""}`}
         />
       ))}
     </div>
@@ -68,9 +80,12 @@ export default function SharedLayoutsPage({ user, layouts, loading, onPlay }) {
                 <div className="layout-card-header">
                   <div>
                     <strong>{layout.name}</strong>
-                    <p>{layout.username} · {layout.difficulty || "Classic"}</p>
+                    <p>{layout.username} · {formatMode(layout.play_mode)}</p>
                   </div>
-                  <span className="rating-pill">{formatRating(layout.avg_rating ?? 0, layout.rating_count ?? 0)}</span>
+                  <div className="layout-pill-stack">
+                    <span className={`mode-pill mode-${layout.play_mode || "classic"}`}>{formatMode(layout.play_mode)}</span>
+                    <span className="rating-pill">{formatRating(layout.avg_rating ?? 0, layout.rating_count ?? 0)}</span>
+                  </div>
                 </div>
                 <LayoutPreview layout={layout} />
                 <div className="layout-stats-table">
@@ -86,6 +101,16 @@ export default function SharedLayoutsPage({ user, layouts, loading, onPlay }) {
                     <span>Rating</span>
                     <strong>{layout.rating_count ? Number(layout.avg_rating ?? 0).toFixed(1) : "No ratings"}</strong>
                   </div>
+                  <div>
+                    <span>Mode</span>
+                    <strong>{formatMode(layout.play_mode)}</strong>
+                  </div>
+                  {layout.play_mode === "fog" && (
+                    <div>
+                      <span>Blocked tiles</span>
+                      <strong>{(layout.locked_tiles || []).length}</strong>
+                    </div>
+                  )}
                 </div>
                 <div className="layout-card-meta">
                   <span>{layout.shared ? "Shared" : "Hidden"}</span>

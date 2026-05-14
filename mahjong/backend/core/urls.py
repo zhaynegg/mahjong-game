@@ -8,6 +8,7 @@ urlpatterns = [
     path("auth/login", views.login),
     path("me", views.me),
     path("daily-challenge", views.daily_challenge),
+    path("daily/summary", views.daily_summary),
     path("game/result", views.game_result),
     path("game/history", views.game_history),
     path("leaderboard/daily", views.leaderboard_daily),

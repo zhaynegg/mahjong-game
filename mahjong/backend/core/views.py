@@ -143,6 +143,38 @@ def normalize_layout_mask(mask):
     return normalized[0] if is_single_level else normalized
 
 
+def normalize_play_mode(value):
+    mode = (value or "classic").strip()
+    if mode not in ("classic", "fog", "no-excuse"):
+        raise ValueError("Layout mode must be classic, fog, or no-excuse.")
+    return mode
+
+
+def normalize_locked_tiles(value):
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise ValueError("Locked tiles must be an array.")
+    normalized = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("Each locked tile must be an object.")
+        try:
+            x = int(item.get("x"))
+            y = int(item.get("y"))
+            z = int(item.get("z"))
+        except (TypeError, ValueError):
+            raise ValueError("Locked tile coordinates must be numbers.")
+        if x < 0 or y < 0 or z < 0:
+            raise ValueError("Locked tile coordinates cannot be negative.")
+        key = (x, y, z)
+        if key not in seen:
+            seen.add(key)
+            normalized.append({"x": x, "y": y, "z": z})
+    return normalized
+
+
 def auth_user(request):
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
@@ -268,6 +300,8 @@ def pro_layouts(request):
                 "id": layout.pk,
                 "name": layout.name,
                 "mask": json.loads(layout.mask),
+                "play_mode": layout.play_mode,
+                "locked_tiles": json.loads(layout.locked_tiles),
                 "created_at": layout.created_at.isoformat(),
                 "is_shared": layout.is_shared,
                 "total_plays": layout.total_plays,
@@ -285,14 +319,23 @@ def pro_layouts(request):
 
         name = (data.get("name") or "").strip()
         mask = data.get("mask")
+        locked_tiles = data.get("locked_tiles", [])
         if len(name) < 2:
             return JsonResponse({"detail": "Layout name must be at least 2 characters."}, status=400)
         try:
             normalized = normalize_layout_mask(mask)
+            play_mode = normalize_play_mode(data.get("play_mode"))
+            normalized_locks = normalize_locked_tiles(locked_tiles)
         except ValueError as exc:
             return JsonResponse({"detail": str(exc)}, status=400)
 
-        CustomLayout.objects.create(user=user, name=name, mask=json.dumps(normalized))
+        CustomLayout.objects.create(
+            user=user,
+            name=name,
+            mask=json.dumps(normalized),
+            play_mode=play_mode,
+            locked_tiles=json.dumps(normalized_locks if play_mode == "fog" else []),
+        )
         return JsonResponse({"ok": True})
 
     return JsonResponse({"detail": "Method not allowed."}, status=405)
@@ -341,6 +384,8 @@ def shared_layouts(request):
                 "name": layout.name,
                 "username": layout.user.username,
                 "mask": layout_mask,
+                "play_mode": layout.play_mode,
+                "locked_tiles": json.loads(layout.locked_tiles),
                 "created_at": layout.created_at.isoformat(),
                 "total_plays": layout.total_plays,
                 "rating_count": layout.ratings_total,
@@ -392,6 +437,69 @@ def rate_shared_layout(request, layout_id):
 @require_GET
 def daily_challenge(request):
     return JsonResponse({"date_key": utc_today_key(), "seed": daily_seed()})
+
+
+def result_payload(item):
+    return {
+        "username": item.user.username,
+        "city": item.city,
+        "score": item.score,
+        "time_seconds": item.time_seconds,
+        "difficulty": item.difficulty,
+        "hints_used": item.hints_used,
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+@require_GET
+def daily_summary(request):
+    user = auth_user(request)
+    today_key = utc_today_key()
+    today_results = GameResult.objects.filter(game_date=today_key, mode="daily")
+    today_wins = today_results.filter(won=True).select_related("user").order_by("-score", "time_seconds", "hints_used")
+    user_results = GameResult.objects.none()
+    if user:
+        user_results = today_results.filter(user=user).order_by("-created_at")
+    user_best = user_results.filter(won=True).order_by("-score", "time_seconds", "hints_used").first()
+    user_rank = None
+    if user_best:
+        for index, item in enumerate(today_wins, start=1):
+            if item.user_id == user.id:
+                user_rank = index
+                break
+
+    archive_dates = (
+        GameResult.objects.filter(mode="daily", won=True)
+        .exclude(game_date=today_key)
+        .values_list("game_date", flat=True)
+        .distinct()
+        .order_by("-game_date")[:7]
+    )
+    archive = []
+    for date_key in archive_dates:
+        winners = (
+            GameResult.objects.filter(game_date=date_key, mode="daily", won=True)
+            .select_related("user")
+            .order_by("-score", "time_seconds", "hints_used")[:5]
+        )
+        archive.append(
+            {
+                "date_key": date_key,
+                "entries": [result_payload(item) for item in winners],
+            }
+        )
+
+    return JsonResponse(
+        {
+            "date_key": today_key,
+            "seed": daily_seed(),
+            "attempts_today": user_results.count() if user else 0,
+            "user_best": result_payload(user_best) if user_best else None,
+            "user_rank": user_rank,
+            "today_leaderboard": [result_payload(item) for item in today_wins[:30]],
+            "archive": archive,
+        }
+    )
 
 
 @csrf_exempt

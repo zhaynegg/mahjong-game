@@ -14,6 +14,8 @@ class CustomLayout(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     name = models.CharField(max_length=128)
     mask = models.TextField()
+    play_mode = models.CharField(max_length=16, default="classic")
+    locked_tiles = models.TextField(default="[]")
     is_shared = models.BooleanField(default=False)
     total_plays = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
