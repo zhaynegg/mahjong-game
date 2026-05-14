@@ -1,55 +1,81 @@
 # Mahjong Focus (Django + React)
 
-Современная веб-платформа маджонга с архитектурой под масштабирование: backend на Django, frontend на React.
+Modern Mahjong Solitaire web platform built with scalable architecture: Django backend and React frontend.
 
-## Что реализовано по уровням
+Live Demo: https://mahjong-focus.onrender.com
 
-### Level 1 (Слабый)
-- Интерактивная раскладка плиток
-- Ручной клик по плиткам
+## Key features
 
-### Level 2 (Средний)
-- Проверка правил: удаляются только свободные одинаковые плитки
-- Подсчет очков, таймер, счетчик ходов
-- Shuffle
-- Несколько раскладок через уровни сложности
+- Interactive tile layout
+- Manual tile selection
+- Mahjong rule validation
+- Score system
+- Timer and move counter
+- Shuffle functionality
+- Multiple layouts by difficulty
+- Layout generator by difficulty
+- User authentication (register/login)
+- Persistent progress and match history
+- Dark/light theme support
+- Hint system + undo moves
+- Responsive interface
+- Daily Challenge with shared global layout
+- AI Coach for strategy assistance
+- Social layer:
+  - daily leaderboard
+  - city rankings
+- Monetization-ready architecture:
+  - Upgrade to Pro flow
+  - future premium skins/subscription support
 
-### Level 3 (Сильный)
-- Генератор раскладок по сложности
-- Авторизация (register/login)
-- История игр и сохранение прогресса в БД
-- Темная/светлая тема
-- Подсказки + отмена хода
-- Адаптивный интерфейс
+## Product Vision
 
-### Level 4 (Великий)
-- Daily Challenge с общей ежедневной раскладкой
-- AI Coach (API-подсказки стратегии)
-- Социальный слой: daily leaderboard + рейтинг городов
-- Продуктовый сигнал монетизации: кнопка Upgrade to Pro
+Mahjong Focus is designed for short focus sessions and long-term player retention.
 
-## Для кого и ценность
+Core engagement systems include:
 
-Продукт ориентирован на пользователей, которым нужны короткие фокус-сессии и ощущение прогресса:
-- ежедневные челленджи возвращают пользователя
-- рейтинг по городам добавляет социальную мотивацию
-- AI coach снижает фрустрацию у новичков
-- архитектура готова к расширению (платные скины, турниры, подписка Pro)
+- daily challenges that encourage return sessions
+- leaderboards and city rankings for social motivation
+- AI-assisted hints that reduce frustration for beginners
+- scalable architecture prepared for future expansion:
+  - tournaments
+  - premium cosmetics
+  - subscriptions
+  - community features
 
-## Стек
+## Screenshots
+
+### Home Screen
+
+<img width="1445" height="787" alt="image" src="https://github.com/user-attachments/assets/862c1bfb-6284-437e-8e0a-0c3032273d00" />
+
+### Gameplay
+
+<img width="1449" height="785" alt="image" src="https://github.com/user-attachments/assets/46c16a30-9fad-4141-be78-43a072d99e99" />
+
+### Layout Builder
+
+<img width="1449" height="799" alt="image" src="https://github.com/user-attachments/assets/26d8bd2c-4cf3-436b-8a4d-6f26244eb4b2" />
+
+### Layout sharing page
+
+<img width="1456" height="830" alt="image" src="https://github.com/user-attachments/assets/8ad82eda-baec-44a8-9403-5e68fe318422" />
+
+
+## Stack
 
 - Backend: Django + SQLite locally, Supabase Postgres when `DATABASE_URL` is set
 - Frontend: React + Vite
 
-## Деплой на Render
+## Deploy on Render
 
-Проект подготовлен для Render Blueprint. В корне репозитория есть `render.yaml`, который создает:
+Project was set for Render Blueprint. The root of repository has `render.yaml`, which creates:
 
 - `mahjong-focus-api` — Django backend web service
 - `mahjong-focus` — React/Vite static site
 - `mahjong-focus-db` — Render Postgres
 
-### Вариант 1: Blueprint
+### 1: Blueprint
 
 1. Push project to GitHub.
 2. In Render Dashboard open **New -> Blueprint**.
@@ -72,7 +98,7 @@ If Render asks you to change service names because a name is taken, update the r
 - backend `CSRF_TRUSTED_ORIGINS`
 - backend `FRONTEND_URL`
 
-### Вариант 2: Manual Render setup
+### 2: Manual Render setup
 
 Backend web service:
 
@@ -110,7 +136,7 @@ Frontend environment:
 VITE_API_URL=https://mahjong-focus-api.onrender.com/api
 ```
 
-## Запуск локально
+## Local development
 
 ### Backend
 
