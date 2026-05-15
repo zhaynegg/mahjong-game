@@ -6,6 +6,7 @@ Live Demo: https://mahjong-focus.onrender.com
 ## User and pro user creation
 There is a pro user with username - "zhassyn" and password - "123456".
 But if you decide to create your own pro user. There is "upgrade to pro" button in the menu. Card number should to be 4242 4242 4242 4242. Other credentials can be written randomly.
+### PLEASE NOTE THAT AUTHORIZATION AND AUTHENTIFICATION may take some time
 ## Key features
 
 - Interactive tile layout
